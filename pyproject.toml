@@ -22,9 +22,8 @@ authors = [
 ]
 
 dependencies = [
-    "tables-io",
-    "macon[db]",
     "tisserande",
+    "pyyaml",
 ]
 
 
@@ -70,8 +69,6 @@ all = [
 ]
 
 
-
-
 [project.urls]
 Source = "https://github.com/eacharles/plombiere"
 
@@ -81,6 +78,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 write_to = "src/plombiere/_version.py"
+fallback_version = "0.0.0.dev0"
 
 [tool.coverage.run]
 parallel = true

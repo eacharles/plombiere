@@ -1,15 +1,15 @@
-# tisserande
+# plombiere
 
-![Tisserande logo](docs/figures/tisserand_logo_big.jpg)
+![Plombiere logo](docs/figures/plombiere.jpg)
 
-Execution provenance tracking for Python functions and shell scripts.
+CECI pipeline provenance tracking, built on [tisserande](https://github.com/eacharles/tisserande).
 
-Tisserande records **what** functions ran, **what** data they consumed and produced, **how long** they took, and **whether** they succeeded — all as a directed acyclic graph (DAG) stored in a database.
+Plombiere extends tisserande with support for [CECI](https://github.com/LSSTDESC/ceci) pipelines — reading their YAML definitions and stage log files to populate a provenance database.
 
 ## Installation
 
 ```bash
-pip install tisserande
+pip install plombiere
 ```
 
 For development:
@@ -19,161 +19,96 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-### 1. Configure tracking
+### 1. Initialise the database
 
 ```python
-from tisserande.tracking import configure
+from tisserande.db.base import init_db
+import plombiere  # registers CECI tables with the database
 
-# Uses in-memory SQLite by default for quick experiments
-configure(db_url="sqlite+aiosqlite:///my_provenance.db")
+init_db("sqlite+aiosqlite:///provenance.db")
 ```
 
-### 2. Decorate your functions
+### 2. Register a pipeline definition
 
 ```python
-from tisserande.tracking import track
-from tisserande.tracking.annotations import DataFile, Param
+from plombiere.ceci_ingest import register_pipeline_from_yaml
 
-@track
-def fit_model(
-    input_catalog: DataFile[str],
-    config_file: DataFile[str],
-    learning_rate: Param[float],
-) -> DataFile[str]:
-    """Train a model and write output."""
-    # ... your code ...
-    return "/data/results/model_output.fits"
-
-# Call normally — provenance is recorded automatically
-fit_model("/data/catalogs/train.fits", "/configs/model.yaml", 0.01)
+pipeline_create, schema_nodes = register_pipeline_from_yaml(
+    "pz_dp1_6band.yaml",
+    description="DP1 photo-z pipeline",
+)
+print(f"Registered {len(schema_nodes)} stage classes")
 ```
 
-### 3. Query the provenance
+### 3. Ingest a pipeline run
 
 ```python
-from tisserande.local_sync import execution, node, edge
+from plombiere.ceci_ingest import ingest_stage_logs
 
-# Get all executions
+pipeline_exec, stage_results = ingest_stage_logs(
+    "logs/",
+    schema_nodes=schema_nodes,
+)
+
+print(f"Pipeline status: {pipeline_exec.status}")
+print(f"Duration: {pipeline_exec.duration_seconds:.1f}s")
+
+for exec_, stage_node, file_nodes in stage_results:
+    print(f"  {stage_node.name}: {exec_.status} ({len(file_nodes)} file handles)")
+```
+
+### 4. Query the provenance
+
+```python
+from plombiere.local_sync import ceci_pipeline, ceci_pipeline_variant
+from tisserande.local_sync import node, edge, execution
+
+# CECI-specific tables
+for p in ceci_pipeline.get_rows():
+    print(p.name)
+
+# Base tisserande tables — all stage/file nodes live here too
 for ex in execution.get_rows():
-    print(f"{ex.id_}: status={ex.status}, duration={ex.duration_seconds:.2f}s")
-
-# Get all nodes for a specific execution
-nodes = node.filter_rows(filters=[...])
+    print(ex.id_, ex.status, ex.duration_seconds)
 ```
 
-## Type Annotations
+## What plombiere tracks
 
-Control how arguments are classified with type annotations:
+**From a pipeline YAML** (`register_pipeline_from_yaml`):
+- One `CeciStageNode` (schema node) per unique stage *class* — deduplicated across pipeline steps that reuse the same algorithm.
+- A `CeciPipeline` record storing the full YAML structure and default config.
 
-```python
-from tisserande.tracking.annotations import (
-    DataFile,      # File containing data (e.g., FITS, HDF5, Parquet)
-    ConfigFile,    # Configuration file (e.g., YAML, JSON, TOML)
-    ConfigDict,    # Dictionary containing configuration
-    Param,         # Numeric parameter
-    ArrayArg,      # Array of values
-    ObjectArg,     # Python object
-    Untracked,     # Skip tracking for this argument
-)
+**From stage log files** (`ingest_stage_logs`):
+- One pipeline-level `Execution` spanning all stages.
+- One stage-level `Execution` per `*.out` log file, parented to the pipeline execution.
+- One `CeciStageNode` instance per stage run, linked to its schema node.
+- One `CeciFileNode` per `Inserting handle into data store.` log line, with the `inprogress_` prefix stripped from output paths.
+- `Edge` records connecting file nodes to stage nodes (input: file → stage; output: stage → file).
+
+## Data model
+
+```
+CeciPipeline
+  └── CeciPipelineVariant(s)
+        └── CeciPipelineInstance(s)
+
+CeciPipeline ──[assoc]──> CeciStageNode (schema)
+                                └── CeciStageNode (instance, per run)
+                                      ├── CeciFileNode (input)  ──→ stage
+                                      └── CeciFileNode (output) ←── stage
 ```
 
-Without annotations, tisserande uses heuristics (file extensions, Python types) to classify arguments automatically.
-
-## Tracking Shell Commands
-
-```python
-from tisserande.tracking import track_shell
-
-result = track_shell(
-    "sextractor input.fits -c config.sex",
-    inputs={
-        "image": "/data/input.fits",
-        "config": "/configs/config.sex",
-    },
-    outputs={
-        "catalog": "/data/output.cat",
-    },
-)
-```
-
-## Async Support
-
-```python
-from tisserande.tracking import track_async
-
-@track_async
-async def async_pipeline(data: DataFile[str]) -> DataFile[str]:
-    # ... async processing ...
-    return "/data/output.fits"
-```
+All node and edge records are stored in tisserande's core tables and participate in the full tisserande provenance graph.
 
 ## Architecture
 
-Tisserande models provenance as a DAG:
-
-```
-[input.fits] ──→ [fit_model()] ──→ [output.fits]
-[config.yaml] ─┘                    
-[lr=0.01] ─────┘
-```
-
-- **Nodes** represent data (files, configs, parameters, arrays, objects) and logic (functions, scripts)
-- **Edges** connect inputs to functions and functions to outputs
-- **Executions** group all nodes/edges from a single function call
-
-The database stores:
-- **Type tables**: reusable definitions (e.g., "PythonFunction: fit_model in mymodule")
-- **Node table**: specific instances with runtime values
-- **Edge table**: directed connections between nodes
-- **Execution table**: timing, status, error info per function call
-
-## Database Backends
-
-By default, tisserande uses SQLite via SQLAlchemy. Configure any SQLAlchemy-compatible database:
+Plombiere is a plugin package. Importing it registers its SQLAlchemy tables with tisserande's `Base` and its node types with tisserande's dispatch layer, so a single `Base.metadata.create_all()` call creates all tables from both packages.
 
 ```python
-configure(db_url="postgresql+asyncpg://user:pass@localhost/provenance")
-```
-
-## REST API
-
-Start the server:
-
-```bash
-tisserande-server --port 8080
-```
-
-Provides CRUD endpoints for all tables at `http://localhost:8080/docs`.
-
-## CLI
-
-```bash
-# List executions
-tisserande-local execution get-rows
-
-# Get a specific node
-tisserande-local node get-row <node-uuid>
-```
-
-## Configuration
-
-Environment variables (prefix `TISSERANDE__`, nested with `__`):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TISSERANDE__DB__URL` | `sqlite+aiosqlite:///tisserande.db` | Database URL |
-| `TISSERANDE__TRACKING__ENABLED` | `true` | Global tracking toggle |
-| `TISSERANDE__TRACKING__BACKEND` | `local_sync` | Backend: `local_sync` or `null` |
-
-## Testing
-
-For tests, use the `NullBackend` to avoid database overhead:
-
-```python
-from tisserande.tracking import configure
-from tisserande.tracking.backends import NullBackend
-
-configure(backend=NullBackend())
+import plombiere           # one import wires everything up
+from tisserande.db.base import init_db, Base
+init_db("sqlite+aiosqlite:///my.db")
+# ... Base.metadata now includes all plombiere tables
 ```
 
 ## License

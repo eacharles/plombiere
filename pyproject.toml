@@ -1,0 +1,177 @@
+[project]
+name = "plombiere"
+description = "Execution provenance tracking for ceci n'est pas un pipeline"
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: POSIX",
+    "Typing :: Typed",
+]
+requires-python = ">=3.13"
+dynamic = ["version"]
+authors = [
+    { name = "Eric Charles", email = "echarles@slac.stanford.edu" },
+]
+
+dependencies = [
+    "tables-io",
+    "macon[db]",
+    "tisserande",
+]
+
+
+[project.optional-dependencies]
+numpy = ["numpy"]
+
+server = [
+    "tisserande[server]",
+]
+
+client = [
+    "tisserande[client]",
+]
+
+dev = [
+    "plombiere[numpy]",
+    "plombiere[server]",
+    "plombiere[client]",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov>=6.0.0",
+    "pytest-timeout>=2.3.1",
+    "mypy",
+    "sqlalchemy[mypy]",
+    "ruff>=0.8.0",
+    "pylint",
+    "types-pyyaml>=6.0.12.20240917",
+]
+
+docs = [
+    "nbsphinx",
+    "sphinx",
+    "sphinx-autodoc-typehints",
+    "sphinx_rtd_theme",
+    "sphinx-autoapi",
+]
+
+all = [
+    "plombiere[server]",
+    "plombiere[client]",
+    "plombiere[dev]",
+    "plombiere[docs]",
+]
+
+
+
+
+[project.urls]
+Source = "https://github.com/eacharles/plombiere"
+
+[build-system]
+requires = ["setuptools>=62", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/plombiere/_version.py"
+
+[tool.coverage.run]
+parallel = true
+source = ["plombiere"]
+
+[tool.coverage.paths]
+source = ["src"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "unexpected",
+    "as uexc:",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+
+[tool.ruff]
+exclude = [
+    "__init__.py",
+]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+ignore = [
+    "COM812",
+    "N802",
+    "N803",
+    "N806",
+    "N812",
+    "N813",
+    "N815",
+    "N816",
+    "UP047",
+]
+select = [
+    "E",
+    "F",
+    "N",
+    "W",
+    "COM",
+    "FBT",
+    "UP",
+    "ASYNC",
+]
+extend-select = [
+    "RUF100",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["plombiere", "tests"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 110
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "error",
+]
+python_files = ["tests/*.py", "tests/*/*.py"]
+python_classes = ["Test"]
+addopts = [
+    "--cov=src",
+    "--cov-report=html",
+]
+
+[tool.mypy]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+ignore_missing_imports = true
+local_partial_types = true
+no_implicit_reexport = true
+show_error_codes = true
+strict_equality = true
+warn_redundant_casts = true
+warn_unreachable = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[tool.pylint.'MESSAGES CONTROL']
+max-line-length = 120
+disable = "W0718, W1203, C0116, C0114, C0103, C0302, C0415, W0603, R0902, R0903, R0911, R0912, R0913, R0917, R0914, R0915, R0801, R0904, R1735"

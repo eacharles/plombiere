@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date
+from typing import Optional
 
 from pydantic import BaseModel
 from sqlalchemy import Date, ForeignKey, Integer, JSON, String, Text
@@ -74,6 +75,7 @@ class CeciPipelineInstanceTable(Base):
     id_: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid7)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    execution_id: Mapped[Optional[uuid.UUID]] = mapped_column(nullable=True, default=None)
     ceci_pipeline_variant_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("ceci_pipeline_variant.id_"),

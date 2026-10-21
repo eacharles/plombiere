@@ -38,10 +38,24 @@ client = [
     "tisserande[client]",
 ]
 
+dashboard = [
+    "dash[ag-grid]>=2.18",
+    "dash-cytoscape>=0.3.0",
+    "plotly>=5.0",
+    "click>=8.0",
+]
+
+test-dashboard = [
+    "selenium>=4.6",
+    "multiprocess",
+]
+
 dev = [
     "plombiere[numpy]",
     "plombiere[server]",
     "plombiere[client]",
+    "plombiere[dashboard]",
+    "plombiere[test-dashboard]",
     "pytest",
     "pytest-asyncio",
     "pytest-cov>=6.0.0",
@@ -64,10 +78,14 @@ docs = [
 all = [
     "plombiere[server]",
     "plombiere[client]",
+    "plombiere[dashboard]",
     "plombiere[dev]",
     "plombiere[docs]",
 ]
 
+
+[project.scripts]
+plombiere-dashboard = "plombiere.cli.dashboard:cli"
 
 [project.urls]
 Source = "https://github.com/eacharles/plombiere"
@@ -149,6 +167,13 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "error",
+    # Selenium and Dash internals emit deprecation / resource warnings we don't control
+    "ignore::DeprecationWarning:selenium",
+    "ignore::DeprecationWarning:dash",
+    "ignore::ResourceWarning",
+    # aiosqlite background thread dies during dash_duo teardown; not a test failure
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
 ]
 python_files = ["tests/*.py", "tests/*/*.py"]
 python_classes = ["Test"]

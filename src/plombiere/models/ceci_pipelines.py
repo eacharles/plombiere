@@ -1,7 +1,7 @@
 """Pydantic models for ceci pipeline, variant, and instance tables."""
 
 from datetime import date
-from typing import ClassVar
+from typing import ClassVar, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,6 +58,7 @@ class CeciPipelineInstanceBase(BaseModel):
 
     status: ExecutionStatus = Field(..., description="Execution status")
     run_date: date = Field(..., description="Execution date")
+    execution_id: Optional[UUID] = Field(None, description="Pipeline-level Execution record this instance corresponds to")
     ceci_pipeline_variant_id: int = Field(..., description="Foreign key into CeciPipelineVariant table")
 
 
@@ -69,6 +70,6 @@ class CeciPipelineInstance(CeciPipelineInstanceBase):
     """CeciPipelineInstance response model."""
 
     model_config = ConfigDict(from_attributes=True)
-    col_names_for_table: ClassVar[list[str]] = ["id_", "status", "run_date", "ceci_pipeline_variant_id"]
+    col_names_for_table: ClassVar[list[str]] = ["id_", "status", "run_date", "execution_id", "ceci_pipeline_variant_id"]
 
     id_: UUID = Field(...)

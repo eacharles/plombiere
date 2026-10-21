@@ -218,6 +218,30 @@ _LOG_FAILURE = textwrap.dedent("""\
 
 _LOG_UNPARSEABLE = "This log has no execution markers.\n"
 
+_CONFIG_YAML = """\
+inform_fzboost:
+  seed: 42
+  trainfrac: 0.75
+estimate_fzboost:
+  chunk_size: 1000
+"""
+
+
+@pytest.fixture()
+def config_yaml_file(tmp_path: Path) -> Path:
+    p = tmp_path / "pz_config.yml"
+    p.write_text(_CONFIG_YAML)
+    return p
+
+
+@pytest.fixture()
+def registered_pipeline():
+    from plombiere.local_sync import ceci_pipeline
+
+    return ceci_pipeline.create_row(
+        name="pz_dp1", description="Photo-z pipeline", structure={"stages": []}, config={}
+    )
+
 
 @pytest.fixture()
 def pipeline_yaml_file(tmp_path: Path) -> Path:
@@ -302,7 +326,7 @@ class TestIngestStageLogs:
         from plombiere.ceci_ingest import ingest_stage_logs
         from tisserande.local_sync import edge
 
-        pipeline_exec, stage_results = ingest_stage_logs(log_dir_success)
+        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_success)
 
         assert pipeline_exec.status == ExecutionStatus.SUCCESS
         assert pipeline_exec.duration_seconds is not None
@@ -324,7 +348,7 @@ class TestIngestStageLogs:
     def test_inprogress_stripped_from_output_path(self, log_dir_success: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        _, stage_results = ingest_stage_logs(log_dir_success)
+        _, _, stage_results = ingest_stage_logs(log_dir_success)
         _, _, file_nodes = stage_results[0]
         paths = {fn.path for fn in file_nodes}
         assert not any("inprogress_" in p for p in paths)
@@ -333,7 +357,7 @@ class TestIngestStageLogs:
     def test_failure_log_sets_failure_status(self, log_dir_mixed: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, stage_results = ingest_stage_logs(log_dir_mixed)
+        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_mixed)
         assert pipeline_exec.status == ExecutionStatus.FAILURE
         statuses = {exec_.status for exec_, _, _ in stage_results}
         assert ExecutionStatus.FAILURE in statuses
@@ -342,7 +366,7 @@ class TestIngestStageLogs:
     def test_pipeline_exec_spans_all_stages(self, log_dir_mixed: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, stage_results = ingest_stage_logs(log_dir_mixed)
+        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_mixed)
         start_times = [exec_.start_time for exec_, _, _ in stage_results]
         end_times = [exec_.end_time for exec_, _, _ in stage_results]
         assert pipeline_exec.start_time == min(start_times)
@@ -358,7 +382,7 @@ class TestIngestStageLogs:
         from plombiere.ceci_ingest import ingest_stage_logs, register_pipeline_from_yaml
 
         _, schema_nodes = register_pipeline_from_yaml(pipeline_yaml_file)
-        _, stage_results = ingest_stage_logs(log_dir_success, schema_nodes=schema_nodes)
+        _, _, stage_results = ingest_stage_logs(log_dir_success, schema_nodes=schema_nodes)
 
         _, stage_node, _ = stage_results[0]
         assert stage_node.ceci_stage_schema_node_id is not None
@@ -367,7 +391,7 @@ class TestIngestStageLogs:
         from plombiere.ceci_ingest import ingest_stage_logs
         from tisserande.local_sync import execution as execution_ops
 
-        pipeline_exec, stage_results = ingest_stage_logs(log_dir_success)
+        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_success)
 
         all_executions = execution_ops.get_rows()
         pipeline_ids = {str(e.id_) for e in all_executions if e.parent_execution_id is None}
@@ -375,3 +399,120 @@ class TestIngestStageLogs:
 
         stage_exec, _, _ = stage_results[0]
         assert str(stage_exec.parent_execution_id) == str(pipeline_exec.id_)
+
+
+class TestIngestStageLogsWithVariant:
+    """Tests for the pipeline_variant path of ingest_stage_logs."""
+
+    @pytest.fixture()
+    def variant(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        return register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
+
+    def test_returns_instance_when_variant_given(self, log_dir_success: Path, variant):
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        _, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance is not None
+        assert instance.id_ is not None
+
+    def test_instance_links_to_variant(self, log_dir_success: Path, variant):
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        _, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance.ceci_pipeline_variant_id == variant.id_
+
+    def test_instance_status_matches_pipeline(self, log_dir_success: Path, variant):
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        pipeline_exec, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance.status == pipeline_exec.status
+
+    def test_instance_run_date_from_log_start(self, log_dir_success: Path, variant):
+        from datetime import date
+
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        pipeline_exec, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance.run_date == pipeline_exec.start_time.date()
+
+    def test_instance_persisted(self, log_dir_success: Path, variant):
+        from plombiere.ceci_ingest import ingest_stage_logs
+        from plombiere.local_sync import ceci_pipeline_instance
+
+        _, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        rows = ceci_pipeline_instance.get_rows()
+        assert any(str(r.id_) == str(instance.id_) for r in rows)
+
+    def test_no_variant_returns_none_instance(self, log_dir_success: Path):
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        _, instance, _ = ingest_stage_logs(log_dir_success)
+        assert instance is None
+
+    def test_failure_pipeline_instance_status(self, log_dir_mixed: Path, variant):
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        _, instance, _ = ingest_stage_logs(log_dir_mixed, pipeline_variant=variant)
+        assert instance.status == ExecutionStatus.FAILURE
+
+    def test_instance_has_execution_id(self, log_dir_success: Path, variant):
+        from plombiere.ceci_ingest import ingest_stage_logs
+
+        pipeline_exec, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance.execution_id == pipeline_exec.id_
+
+
+class TestRegisterPipelineVariantFromYaml:
+    def test_creates_variant(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
+        assert variant.id_ is not None
+        assert variant.ceci_pipeline_id == registered_pipeline.id_
+
+    def test_default_name_from_file_stem(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
+        assert variant.name == "pz_config"
+
+    def test_custom_name(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        variant = register_pipeline_variant_from_yaml(
+            config_yaml_file, registered_pipeline.id_, name="gold_sample"
+        )
+        assert variant.name == "gold_sample"
+
+    def test_overrides_stored_from_yaml(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
+        assert variant.overrides["inform_fzboost"]["seed"] == 42
+        assert variant.overrides["estimate_fzboost"]["chunk_size"] == 1000
+
+    def test_extra_description(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        variant = register_pipeline_variant_from_yaml(
+            config_yaml_file, registered_pipeline.id_, extra_description="Gold sample run"
+        )
+        assert variant.extra_description == "Gold sample run"
+
+    def test_empty_config_yaml(self, tmp_path: Path, registered_pipeline):
+        p = tmp_path / "empty_config.yml"
+        p.write_text("{}\n")
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+
+        variant = register_pipeline_variant_from_yaml(p, registered_pipeline.id_)
+        assert variant.overrides == {}
+
+    def test_variant_persisted(self, config_yaml_file: Path, registered_pipeline):
+        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
+        from plombiere.local_sync import ceci_pipeline_variant
+
+        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
+        rows = ceci_pipeline_variant.get_rows()
+        assert any(r.id_ == variant.id_ for r in rows)

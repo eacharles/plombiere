@@ -6,6 +6,10 @@ Two main entry points:
     Reads a CECI pipeline YAML and populates schema-level (execution_id=None)
     CeciStageNode records — one per unique stage class.
 
+``register_pipeline_variant_from_yaml``
+    Reads a config override YAML and registers a CeciPipelineVariant linked
+    to an already-registered CeciPipeline.
+
 ``ingest_stage_logs``
     Reads a directory of ``{stage_name}.out`` log files produced by a CECI
     pipeline run and creates one Execution + one instance CeciStageNode per
@@ -13,13 +17,19 @@ Two main entry points:
 
 Usage::
 
-    from plombiere.ceci_ingest import register_pipeline_from_yaml, ingest_stage_logs
+    from plombiere.ceci_ingest import register_pipeline_from_yaml, register_pipeline_variant_from_yaml, ingest_stage_logs
+    from plombiere.local_sync import ceci_pipeline as pipeline_ops
     from tisserande.db.base import init_db
 
     init_db("sqlite+aiosqlite:///my.db")
-    _, schema_nodes = register_pipeline_from_yaml("pz_dp1_6band.yaml")
-    pipeline_exec, results = ingest_stage_logs("logs/", schema_nodes=schema_nodes)
+    pipeline_create, schema_nodes = register_pipeline_from_yaml("pz_dp1_6band.yaml")
+    pipeline_row = pipeline_ops.create_row(**pipeline_create.model_dump())
+    variant = register_pipeline_variant_from_yaml("pz_dp1_6band_config.yml", pipeline_row.id_)
+    pipeline_exec, instance, results = ingest_stage_logs(
+        "logs/", schema_nodes=schema_nodes, pipeline_variant=variant
+    )
     print(pipeline_exec.status, pipeline_exec.duration_seconds)
+    print(instance.id_)
     for exec_, stage_node, file_nodes in results:
         print(exec_.status, stage_node.name, len(file_nodes))
 """
@@ -42,7 +52,14 @@ from tisserande.models.edges import EdgeCreate
 from tisserande.models.execution import Execution, ExecutionCreate
 from tisserande.models.types import ExecutionStatus
 
-from .models.ceci_pipelines import CeciPipelineCreate
+from .local_sync import ceci_pipeline_instance as instance_ops
+from .local_sync import ceci_pipeline_variant as variant_ops
+from .models.ceci_pipelines import (
+    CeciPipelineCreate,
+    CeciPipelineInstance,
+    CeciPipelineVariant,
+    CeciPipelineVariantCreate,
+)
 from .models.nodes import CeciFileNode, CeciFileNodeCreate, CeciStageNode, CeciStageNodeCreate
 
 _EXECUTING_RE = re.compile(
@@ -163,6 +180,48 @@ def register_pipeline_from_yaml(
     return pipeline_create, stage_nodes
 
 
+def register_pipeline_variant_from_yaml(
+    config_yaml_path: str | Path,
+    ceci_pipeline_id: int,
+    *,
+    name: str | None = None,
+    extra_description: str = "",
+) -> CeciPipelineVariant:
+    """Create a CeciPipelineVariant record from a config YAML file.
+
+    Parameters
+    ----------
+    config_yaml_path:
+        Path to the pipeline config override YAML (e.g. ``pz_dp1_4band_config.yml``).
+    ceci_pipeline_id:
+        ID of the already-registered ``CeciPipeline`` this variant belongs to.
+    name:
+        Variant name. Defaults to the config YAML file stem.
+    extra_description:
+        Human-readable description of what makes this variant distinct.
+
+    Returns
+    -------
+    CeciPipelineVariant
+        The newly created variant record.
+    """
+    config_yaml_path = Path(config_yaml_path)
+    variant_name = name or config_yaml_path.stem
+
+    with config_yaml_path.open() as f:
+        overrides: dict = yaml.safe_load(f) or {}
+
+    row = variant_ops.create_row(
+        **CeciPipelineVariantCreate(
+            name=variant_name,
+            extra_description=extra_description,
+            overrides=overrides,
+            ceci_pipeline_id=ceci_pipeline_id,
+        ).model_dump()
+    )
+    return CeciPipelineVariant.model_validate(row)
+
+
 def stage_node_ids(stage_nodes: list[CeciStageNode]) -> list[UUID]:
     """Extract IDs from a list of stage nodes (convenience for building assoc records)."""
     return [n.id_ for n in stage_nodes]
@@ -229,12 +288,17 @@ def ingest_stage_logs(
     log_dir: str | Path,
     *,
     schema_nodes: list[CeciStageNode] | None = None,
-) -> tuple[Execution, list[tuple[Execution, CeciStageNode, list[CeciFileNode]]]]:
+    pipeline_variant: CeciPipelineVariant | None = None,
+) -> tuple[Execution, CeciPipelineInstance | None, list[tuple[Execution, CeciStageNode, list[CeciFileNode]]]]:
     """Read a directory of CECI stage log files and write execution records.
 
     Creates one pipeline-level ``Execution`` and for each ``{stage_name}.out``
     file creates a stage ``Execution``, a ``CeciStageNode`` instance, one
     ``CeciFileNode`` per logged file handle, and connecting ``Edge`` records.
+
+    If *pipeline_variant* is given a ``CeciPipelineInstance`` is also created
+    and linked to that variant, using the pipeline's inferred status and start
+    date.
 
     Parameters
     ----------
@@ -242,11 +306,15 @@ def ingest_stage_logs(
         Directory containing ``*.out`` log files.
     schema_nodes:
         Schema-level ``CeciStageNode`` records to link against. Optional.
+    pipeline_variant:
+        If provided, a ``CeciPipelineInstance`` is created and returned.
 
     Returns
     -------
-    ``(pipeline_execution, stage_results)`` where ``stage_results`` is a list
-    of ``(Execution, CeciStageNode, list[CeciFileNode])`` triples.
+    ``(pipeline_execution, pipeline_instance, stage_results)`` where
+    *pipeline_instance* is ``None`` when *pipeline_variant* is not given, and
+    ``stage_results`` is a list of ``(Execution, CeciStageNode,
+    list[CeciFileNode])`` triples.
     """
     log_dir = Path(log_dir)
     schema_by_classname: dict[str, CeciStageNode] = {}
@@ -279,6 +347,16 @@ def ingest_stage_logs(
         ).model_dump()
     )
     pipeline_execution_id: UUID = pipeline_exec_row.id_
+
+    pipeline_instance: CeciPipelineInstance | None = None
+    if pipeline_variant is not None:
+        instance_row = instance_ops.create_row(
+            status=pipeline_status.value,
+            run_date=pipeline_start.date(),
+            execution_id=pipeline_exec_row.id_,
+            ceci_pipeline_variant_id=pipeline_variant.id_,
+        )
+        pipeline_instance = CeciPipelineInstance.model_validate(instance_row)
 
     stage_results: list[tuple[Execution, CeciStageNode, list[CeciFileNode]]] = []
 
@@ -337,4 +415,4 @@ def ingest_stage_logs(
         stage_response = CeciStageNode.model_validate(stage_row)
         stage_results.append((exec_response, stage_response, file_nodes))
 
-    return Execution.model_validate(pipeline_exec_row), stage_results
+    return Execution.model_validate(pipeline_exec_row), pipeline_instance, stage_results

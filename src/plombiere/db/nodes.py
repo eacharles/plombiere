@@ -6,16 +6,16 @@ from pydantic import BaseModel
 from sqlalchemy import JSON, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from tisserande.db.nodes import DataFileNodeTable, NodeTable
+from tisserande.db.nodes import DataFileNode, Node
 from tisserande.db_oper.nodes import register_node_type
 
 from .. import models
 
 
-class CeciFileNodeTable(DataFileNodeTable):
+class CeciFileNodeTable(DataFileNode):
     """ORM table for CECI file nodes.
 
-    Extends DataFileNodeTable via 3-level joined-table inheritance:
+    Extends DataFileNode via 3-level joined-table inheritance:
     node → data_file_node → ceci_file_node.
     """
 
@@ -43,7 +43,7 @@ class CeciFileNodeTable(DataFileNodeTable):
         return "ceci_file_node"
 
 
-class CeciStageNodeTable(NodeTable):
+class CeciStageNodeTable(Node):
     """ORM table for CECI stage nodes."""
 
     __tablename__ = "ceci_stage_node"

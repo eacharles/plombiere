@@ -127,7 +127,15 @@ def pipeline_elements(
         classname = stage.get("classname", name)
         has_override = bool(overrides and name in overrides)
         elements.append({
-            "data": {"id": name, "label": f"{classname}\n({name})"},
+            "data": {
+                "id": name,
+                "label": f"{classname}\n({name})",
+                "node_type": "stage",
+                "stage_name": name,
+                "classname": classname,
+                "aliases": stage.get("aliases", {}),
+                "overrides": overrides.get(name) if overrides else None,
+            },
             "classes": "stage-override" if has_override else "stage",
         })
 
@@ -145,7 +153,7 @@ def pipeline_elements(
             if file_id not in seen_file_nodes:
                 seen_file_nodes.add(file_id)
                 elements.append({
-                    "data": {"id": file_id, "label": handle},
+                    "data": {"id": file_id, "label": handle, "node_type": "file", "handle": handle},
                     "classes": "file",
                 })
             for edge in ((src, file_id), (file_id, dst)):
@@ -204,7 +212,14 @@ def instance_elements(execution_id: UUID | str) -> list[dict[str, Any]]:
             raw_status.value if hasattr(raw_status, "value") else str(raw_status)
         ).lower()
         elements.append({
-            "data": {"id": nid, "label": n.name or "stage"},
+            "data": {
+                "id": nid,
+                "label": n.name or "stage",
+                "node_type": "ceci_stage",
+                "name": n.name,
+                "execution_id": str(n.execution_id) if n.execution_id else None,
+                "status": status_str,
+            },
             "classes": f"stage stage-{status_str}",
         })
 
@@ -218,7 +233,14 @@ def instance_elements(execution_id: UUID | str) -> list[dict[str, Any]]:
         else:
             label = nid[:8]
         elements.append({
-            "data": {"id": nid, "label": label},
+            "data": {
+                "id": nid,
+                "label": label,
+                "node_type": "ceci_file",
+                "path": n.path,
+                "arg_name": n.arg_name,
+                "execution_id": str(n.execution_id) if n.execution_id else None,
+            },
             "classes": "file",
         })
 

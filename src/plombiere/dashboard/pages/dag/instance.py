@@ -2,7 +2,7 @@
 
 import dash
 import dash_cytoscape as cyto
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, State, callback, clientside_callback, dcc, html
 
 from plombiere.backend import BackendProvider
 from plombiere.dashboard.pages.dag._builders import DAG_LAYOUT, STYLESHEET, instance_elements
@@ -18,6 +18,36 @@ _STATUS_LEGEND = html.Div(
     ],
     style={"fontSize": "12px", "marginBottom": "10px"},
 )
+
+_DETAIL_PANEL_STYLE = {
+    "width": "280px",
+    "flexShrink": "0",
+    "borderLeft": "1px solid #dee2e6",
+    "padding": "12px",
+    "backgroundColor": "#f8f9fa",
+    "overflowY": "auto",
+    "marginTop": "16px",
+    "maxHeight": "680px",
+    "fontSize": "13px",
+}
+
+_PLACEHOLDER = html.P(
+    "Right-click a node to see its details.",
+    style={"color": "#aaa", "fontStyle": "italic"},
+)
+
+
+def _kv_row(key, value):
+    return html.Div(
+        [
+            html.Span(key, style={"fontWeight": "600", "color": "#555", "display": "block", "marginBottom": "2px"}),
+            html.Span(
+                str(value) if value is not None else "—",
+                style={"wordBreak": "break-all", "color": "#333"},
+            ),
+        ],
+        style={"padding": "6px 0", "borderBottom": "1px solid #eee"},
+    )
 
 
 def layout(**kwargs):
@@ -40,7 +70,7 @@ def layout(**kwargs):
     return html.Div([
         html.H2("Instance DAG"),
         html.P(
-            "Stage nodes are coloured by execution status. File nodes show data handles.",
+            "Stage nodes are coloured by execution status. Right-click any node for details.",
             style={"color": "#888", "fontSize": "13px"},
         ),
         html.Hr(),
@@ -51,7 +81,16 @@ def layout(**kwargs):
             placeholder="Select a pipeline instance…",
             style={"maxWidth": "700px"},
         ),
-        html.Div(id="dag-instance-graph-container", style={"marginTop": "16px"}),
+        html.Div(
+            [
+                html.Div(id="dag-instance-graph-container", style={"flex": "1 1 0%", "minWidth": 0, "marginTop": "16px"}),
+                html.Div(id="dag-instance-detail-panel", children=_PLACEHOLDER, style=_DETAIL_PANEL_STYLE),
+            ],
+            style={"display": "flex", "gap": "0", "alignItems": "flex-start"},
+        ),
+        dcc.Store(id="dag-instance-hovered-node"),
+        dcc.Store(id="dag-instance-rightclick-node"),
+        html.Button(id="dag-instance-rightclick-trigger", n_clicks=0, style={"display": "none"}),
     ])
 
 
@@ -87,3 +126,69 @@ def render_instance_dag(instance_id_str):
         ])
     except Exception as e:
         return html.P(f"Error: {e}", style={"color": "red"})
+
+
+clientside_callback(
+    "function(d) { return d != null ? d : window.dash_clientside.no_update; }",
+    Output("dag-instance-hovered-node", "data"),
+    Input("dag-instance-graph", "mouseoverNodeData"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    "function(n, h) { if (n && h) return h; return window.dash_clientside.no_update; }",
+    Output("dag-instance-rightclick-node", "data"),
+    Input("dag-instance-rightclick-trigger", "n_clicks"),
+    State("dag-instance-hovered-node", "data"),
+    prevent_initial_call=True,
+)
+
+
+@callback(
+    Output("dag-instance-detail-panel", "children"),
+    Input("dag-instance-rightclick-node", "data"),
+    prevent_initial_call=True,
+)
+def show_instance_node_detail(node_data):
+    if not node_data:
+        return _PLACEHOLDER
+    node_type = node_data.get("node_type")
+    node_id_str = node_data.get("id")
+    try:
+        from uuid import UUID
+        provider = BackendProvider.get()
+        if node_type == "ceci_stage":
+            row = provider.get_ops("ceci_stage_node").get_row(UUID(node_id_str))
+            title = f"Stage: {row.name or node_id_str}"
+            fields = [
+                ("id", row.id_),
+                ("name", row.name),
+                ("python_path", row.python_path),
+                ("version", row.version),
+                ("status", node_data.get("status")),
+                ("execution_id", row.execution_id),
+                ("overrides", row.overrides),
+                ("data_registry_id", row.data_registry_id),
+                ("ceci_stage_schema_node_id", row.ceci_stage_schema_node_id),
+            ]
+        elif node_type == "ceci_file":
+            row = provider.get_ops("ceci_file_node").get_row(UUID(node_id_str))
+            title = f"File: {row.arg_name or node_id_str}"
+            fields = [
+                ("id", row.id_),
+                ("path", row.path),
+                ("arg_name", row.arg_name),
+                ("execution_id", row.execution_id),
+                ("data_registry_id", row.data_registry_id),
+                ("description", row.description),
+                ("ceci_file_schema_node_id", row.ceci_file_schema_node_id),
+            ]
+        else:
+            return _PLACEHOLDER
+    except Exception as e:
+        return html.P(f"Error loading details: {e}", style={"color": "red"})
+
+    return html.Div([
+        html.H6(title, style={"marginTop": 0, "marginBottom": "10px", "color": "#333"}),
+        html.Div([_kv_row(k, v) for k, v in fields]),
+    ])

@@ -13,13 +13,12 @@ from plombiere.models import (
     CeciPipelineCreate,
     CeciPipelineInstance,
     CeciPipelineInstanceCreate,
-    CeciPipelineStageAssoc,
-    CeciPipelineStageAssocCreate,
     CeciPipelineVariant,
     CeciPipelineVariantCreate,
 )
-from plombiere.models.nodes import CeciFileNodeCreate, CeciStageNodeCreate
+from plombiere.models.nodes import CeciFileCreate, CeciStageCallCreate
 from plombiere.models.types import CeciNodeType
+from tisserande.db.utils import uuid7
 from tisserande.models.types import ExecutionStatus
 
 
@@ -60,29 +59,13 @@ class TestCeciPipelineModels:
         assert obj.status == ExecutionStatus.SUCCESS
 
     def test_instance_response(self):
-        import uuid
-
         CeciPipelineInstance(
-            id_=uuid.uuid4(),
+            uid_=uuid7(),
             status=ExecutionStatus.SUCCESS,
             run_date=date(2025, 7, 20),
             ceci_pipeline_variant_id=1,
         )
         assert "run_date" in CeciPipelineInstance.col_names_for_table
-
-    def test_assoc_create(self):
-        import uuid
-
-        stage_id = uuid.uuid4()
-        obj = CeciPipelineStageAssocCreate(ceci_pipeline_id=1, ceci_stage_node_id=stage_id)
-        assert obj.ceci_pipeline_id == 1
-
-    def test_assoc_response(self):
-        import uuid
-
-        stage_id = uuid.uuid4()
-        obj = CeciPipelineStageAssoc(id_=1, ceci_pipeline_id=1, ceci_stage_node_id=stage_id)
-        assert obj.id_ == 1
 
 
 class TestCeciNodeTypes:
@@ -91,20 +74,21 @@ class TestCeciNodeTypes:
         assert not CeciNodeType.CECI_FILE.is_logic
 
     def test_ceci_stage_is_logic(self):
-        assert CeciNodeType.CECI_STAGE.is_logic
-        assert not CeciNodeType.CECI_STAGE.is_data
+        assert CeciNodeType.CECI_STAGE_CALL.is_logic
+        assert not CeciNodeType.CECI_STAGE_CALL.is_data
 
-    def test_ceci_stage_node_create(self):
-        obj = CeciStageNodeCreate(
+    def test_ceci_stage_call_create(self):
+        obj = CeciStageCallCreate(
             name="FlexZBoostEstimator",
             python_path="rail.estimation.algos.flexzboost.FlexZBoostEstimator",
         )
-        assert obj.node_type == "ceci_stage"
+        assert obj.node_type == "ceci_stage_call"
         assert obj.python_path == "rail.estimation.algos.flexzboost.FlexZBoostEstimator"
 
-    def test_ceci_file_node_create(self):
-        obj = CeciFileNodeCreate(
+    def test_ceci_file_create(self):
+        obj = CeciFileCreate(
             file_path="/tmp/output.hdf5",
+            creator="ceci",
         )
         assert obj.node_type == "ceci_file"
         assert obj.file_path == "/tmp/output.hdf5"
@@ -159,28 +143,9 @@ class TestCeciPipelineLayer:
             run_date=date(2025, 7, 20),
             ceci_pipeline_variant_id=variant_row.id_,
         )
-        assert instance_row.id_ is not None
+        assert instance_row.uid_ is not None
         instances = ceci_pipeline_instance.get_rows()
-        assert any(str(r.id_) == str(instance_row.id_) for r in instances)
-
-    def test_create_stage_assoc(self):
-        from plombiere.local_sync import ceci_pipeline, ceci_pipeline_stage_assoc
-        from tisserande.local_sync import node
-
-        pipeline_row = ceci_pipeline.create_row(
-            name="pz_v4", description="", structure={}, config={}
-        )
-        stage_node_row = node.create_row(
-            node_type="ceci_stage",
-            name="FZBoost",
-            python_path="rail.algos.FZBoost",
-        )
-        assoc_row = ceci_pipeline_stage_assoc.create_row(
-            ceci_pipeline_id=pipeline_row.id_,
-            ceci_stage_node_id=stage_node_row.uid_,
-        )
-        assert assoc_row.ceci_pipeline_id == pipeline_row.id_
-        assert str(assoc_row.ceci_stage_node_id) == str(stage_node_row.uid_)
+        assert any(str(r.uid_) == str(instance_row.uid_) for r in instances)
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +295,7 @@ class TestIngestStageLogs:
         assert len(stage_results) == 1
         stage_node, file_nodes = stage_results[0]
         assert stage_node.status == ExecutionStatus.SUCCESS
-        assert stage_node.node_type == "ceci_stage"
+        assert stage_node.node_type == "ceci_stage_call"
 
         assert len(file_nodes) == 3
 
@@ -370,15 +335,6 @@ class TestIngestStageLogs:
         with pytest.raises(ValueError, match="No parseable stage log files"):
             ingest_stage_logs(log_dir_empty)
 
-    def test_schema_nodes_linked(self, pipeline_yaml_file: Path, log_dir_success: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs, register_pipeline_from_yaml
-
-        _, schema_nodes = register_pipeline_from_yaml(pipeline_yaml_file)
-        _, stage_results = ingest_stage_logs(log_dir_success, schema_nodes=schema_nodes)
-
-        stage_node, _ = stage_results[0]
-        assert stage_node.ceci_stage_schema_node_id is not None
-
 
 class TestIngestStageLogsWithVariant:
     """Tests for the pipeline_variant path of ingest_stage_logs."""
@@ -394,7 +350,7 @@ class TestIngestStageLogsWithVariant:
 
         instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
         assert instance is not None
-        assert instance.id_ is not None
+        assert instance.uid_ is not None
 
     def test_instance_links_to_variant(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
@@ -420,7 +376,7 @@ class TestIngestStageLogsWithVariant:
 
         instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
         rows = ceci_pipeline_instance.get_rows()
-        assert any(str(r.id_) == str(instance.id_) for r in rows)
+        assert any(str(r.uid_) == str(instance.uid_) for r in rows)
 
     def test_no_variant_returns_none_instance(self, log_dir_success: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
@@ -436,10 +392,13 @@ class TestIngestStageLogsWithVariant:
 
     def test_stage_nodes_linked_to_instance(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
+        from tisserande.local_sync import association as assoc_ops
 
         instance, stage_results = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        graph_id = str(instance.uid_)
+        associated_node_ids = {str(a.node_id) for a in assoc_ops.get_rows() if str(a.graph_id) == graph_id}
         for stage_node, _ in stage_results:
-            assert str(stage_node.ceci_pipeline_instance_id) == str(instance.id_)
+            assert str(stage_node.uid_) in associated_node_ids
 
 
 class TestRegisterPipelineVariantFromYaml:

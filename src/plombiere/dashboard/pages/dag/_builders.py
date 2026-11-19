@@ -188,15 +188,20 @@ def instance_elements(pipeline_instance_id: UUID | str) -> list[dict[str, Any]]:
     provider = BackendProvider.get()
     instance_id_str = str(pipeline_instance_id)
 
+    associated_node_ids = {
+        str(a.node_id)
+        for a in provider.get_ops("association").get_rows()
+        if str(a.graph_id) == instance_id_str
+    }
     stage_nodes = [
-        n for n in provider.get_ops("ceci_stage_node").get_rows()
-        if n.ceci_pipeline_instance_id and str(n.ceci_pipeline_instance_id) == instance_id_str
+        n for n in provider.get_ops("ceci_stage_call").get_rows()
+        if str(n.uid_) in associated_node_ids
     ]
 
     stage_node_ids_set: set[str] = {str(n.uid_) for n in stage_nodes}
 
     file_nodes = [
-        n for n in provider.get_ops("ceci_file_node").get_rows()
+        n for n in provider.get_ops("ceci_file").get_rows()
         if any(
             str(e.from_id) in stage_node_ids_set or str(e.to_id) in stage_node_ids_set
             for e in edge_ops.get_rows()
@@ -218,7 +223,7 @@ def instance_elements(pipeline_instance_id: UUID | str) -> list[dict[str, Any]]:
             "data": {
                 "id": nid,
                 "label": n.name or "stage",
-                "node_type": "ceci_stage",
+                "node_type": "ceci_stage_call",
                 "name": n.name,
                 "execution_id": str(n.execution_id) if n.execution_id else None,
                 "status": status_str,

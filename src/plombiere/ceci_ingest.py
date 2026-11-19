@@ -4,7 +4,7 @@ Two main entry points:
 
 ``register_pipeline_from_yaml``
     Reads a CECI pipeline YAML and populates schema-level (no pipeline instance)
-    CeciStageNode records — one per unique stage class.
+    CeciStageCall records — one per unique stage class.
 
 ``register_pipeline_variant_from_yaml``
     Reads a config override YAML and registers a CeciPipelineVariant linked
@@ -12,8 +12,8 @@ Two main entry points:
 
 ``ingest_stage_logs``
     Reads a directory of ``{stage_name}.out`` log files produced by a CECI
-    pipeline run and creates one instance CeciStageNode per file, plus
-    CeciFileNode instances and edges for every file handle logged.
+    pipeline run and creates one instance CeciStageCall per file, plus
+    CeciFile instances and edges for every file handle logged.
 
 Usage::
 
@@ -55,13 +55,14 @@ from tisserande.models.types import ExecutionStatus
 
 from .local_sync import ceci_pipeline_instance as instance_ops
 from .local_sync import ceci_pipeline_variant as variant_ops
+from tisserande.local_sync import association as assoc_ops
 from .models.ceci_pipelines import (
     CeciPipelineCreate,
     CeciPipelineInstance,
     CeciPipelineVariant,
     CeciPipelineVariantCreate,
 )
-from .models.nodes import CeciFileNode, CeciFileNodeCreate, CeciStageNode, CeciStageNodeCreate
+from .models.nodes import CeciFile, CeciFileCreate, CeciStageCall, CeciStageCallCreate
 
 _EXECUTING_RE = re.compile(
     r"Executing stage:\s+(?P<classname>\S+)\s+@\s+(?P<ts>.+)"
@@ -129,7 +130,7 @@ def register_pipeline_from_yaml(
     name: str | None = None,
     description: str = "",
     config: dict | None = None,
-) -> tuple[CeciPipelineCreate, list[CeciStageNode]]:
+) -> tuple[CeciPipelineCreate, list[CeciStageCall]]:
     """Parse a CECI pipeline YAML and register schema-level records in the database.
 
     Parameters
@@ -148,7 +149,7 @@ def register_pipeline_from_yaml(
     pipeline_create:
         A ``CeciPipelineCreate`` model populated from the YAML.
     stage_nodes:
-        List of ``CeciStageNode`` response models, one per unique stage class.
+        List of ``CeciStageCall`` response models, one per unique stage class.
     """
     yaml_path = Path(yaml_path)
     pipeline_name = name or yaml_path.stem
@@ -162,14 +163,14 @@ def register_pipeline_from_yaml(
 
     unique_stage_classes = _parse_stage_classes(stages_raw)
 
-    stage_nodes: list[CeciStageNode] = []
+    stage_nodes: list[CeciStageCall] = []
     for stage_class in unique_stage_classes:
-        create_kwargs = CeciStageNodeCreate(
+        create_kwargs = CeciStageCallCreate(
             name=stage_class["name"],
             python_path=stage_class["python_path"],
         ).model_dump()
         row = node_ops.create_row(**create_kwargs)
-        stage_nodes.append(CeciStageNode.model_validate(row))
+        stage_nodes.append(CeciStageCall.model_validate(row))
 
     pipeline_create = CeciPipelineCreate(
         name=pipeline_name,
@@ -223,7 +224,7 @@ def register_pipeline_variant_from_yaml(
     return CeciPipelineVariant.model_validate(row)
 
 
-def stage_node_ids(stage_nodes: list[CeciStageNode]) -> list[UUID]:
+def stage_node_ids(stage_nodes: list[CeciStageCall]) -> list[UUID]:
     """Extract IDs from a list of stage nodes (convenience for building assoc records)."""
     return [n.uid_ for n in stage_nodes]
 
@@ -288,25 +289,25 @@ def _parse_log_file(log_path: Path) -> StageLogRecord | None:
 def ingest_stage_logs(
     log_dir: str | Path,
     *,
-    schema_nodes: list[CeciStageNode] | None = None,
+    schema_nodes: list[CeciStageCall] | None = None,
     pipeline_variant: CeciPipelineVariant | None = None,
-) -> tuple[CeciPipelineInstance | None, list[tuple[CeciStageNode, list[CeciFileNode]]]]:
+) -> tuple[CeciPipelineInstance | None, list[tuple[CeciStageCall, list[CeciFile]]]]:
     """Read a directory of CECI stage log files and write execution records.
 
-    Creates one ``CeciStageNode`` instance per ``{stage_name}.out`` file (with
-    status and timing embedded), one ``CeciFileNode`` per logged file handle,
+    Creates one ``CeciStageCall`` instance per ``{stage_name}.out`` file (with
+    status and timing embedded), one ``CeciFile`` per logged file handle,
     and connecting ``Edge`` records.
 
     If *pipeline_variant* is given a ``CeciPipelineInstance`` is also created
     and linked to that variant.  Stage nodes are linked back to the pipeline
-    instance via their ``ceci_pipeline_instance_id`` field.
+    instance via an ``Association`` record.
 
     Parameters
     ----------
     log_dir:
         Directory containing ``*.out`` log files.
     schema_nodes:
-        Schema-level ``CeciStageNode`` records to link against. Optional.
+        Schema-level ``CeciStageCall`` records to link against. Optional.
     pipeline_variant:
         If provided, a ``CeciPipelineInstance`` is created and returned.
 
@@ -314,10 +315,10 @@ def ingest_stage_logs(
     -------
     ``(pipeline_instance, stage_results)`` where *pipeline_instance* is ``None``
     when *pipeline_variant* is not given, and ``stage_results`` is a list of
-    ``(CeciStageNode, list[CeciFileNode])`` pairs.
+    ``(CeciStageCall, list[CeciFile])`` pairs.
     """
     log_dir = Path(log_dir)
-    schema_by_classname: dict[str, CeciStageNode] = {}
+    schema_by_classname: dict[str, CeciStageCall] = {}
     if schema_nodes:
         for sn in schema_nodes:
             if sn.name and sn.name not in schema_by_classname:
@@ -345,31 +346,32 @@ def ingest_stage_logs(
         )
         pipeline_instance = CeciPipelineInstance.model_validate(instance_row)
 
-    stage_results: list[tuple[CeciStageNode, list[CeciFileNode]]] = []
+    stage_results: list[tuple[CeciStageCall, list[CeciFile]]] = []
 
     for record in records:
-        schema_node = schema_by_classname.get(record.classname)
         stage_row = node_ops.create_row(
-            **CeciStageNodeCreate(
+            **CeciStageCallCreate(
                 name=record.instance_name,
                 status=record.status,
                 start_time=record.start_time,
                 end_time=record.end_time,
                 duration_seconds=record.duration_seconds,
-                ceci_stage_schema_node_id=schema_node.uid_ if schema_node else None,
-                ceci_pipeline_instance_id=pipeline_instance.id_ if pipeline_instance else None,
             ).model_dump()
         )
-        stage_node = CeciStageNode.model_validate(stage_row)
+        stage_node = CeciStageCall.model_validate(stage_row)
 
-        file_nodes: list[CeciFileNode] = []
+        if pipeline_instance is not None:
+            assoc_ops.create_row(node_id=stage_row.uid_, graph_id=pipeline_instance.uid_)
+
+        file_nodes: list[CeciFile] = []
         for handle in record.file_handles:
             file_row = node_ops.create_row(
-                **CeciFileNodeCreate(
+                **CeciFileCreate(
                     file_path=handle.path,
+                    creator="ceci",
                 ).model_dump()
             )
-            file_node = CeciFileNode.model_validate(file_row)
+            file_node = CeciFile.model_validate(file_row)
             file_nodes.append(file_node)
 
             if handle.is_output:

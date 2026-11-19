@@ -87,11 +87,11 @@ class BackendProvider:
         ops_map: dict[str, Any] = {
             "node": ts_sync.node,
             "edge": ts_sync.edge,
-            "ceci_file_node": _TypeFilteredNodeOps(ts_sync.node, "ceci_file"),
-            "ceci_stage_node": _TypeFilteredNodeOps(ts_sync.node, "ceci_stage"),
+            "association": ts_sync.association,
+            "ceci_file": _TypeFilteredNodeOps(ts_sync.node, "ceci_file"),
+            "ceci_stage_call": _TypeFilteredNodeOps(ts_sync.node, "ceci_stage_call"),
             "ceci_pipeline": pl_sync.ceci_pipeline,
             "ceci_pipeline_variant": pl_sync.ceci_pipeline_variant,
             "ceci_pipeline_instance": pl_sync.ceci_pipeline_instance,
-            "ceci_pipeline_stage_assoc": pl_sync.ceci_pipeline_stage_assoc,
         }
         return ops_map[entity_name]

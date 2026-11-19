@@ -7,7 +7,7 @@ class CeciNodeType(enum.Enum):
     """Discriminator values for CECI node types."""
 
     CECI_FILE = "ceci_file"
-    CECI_STAGE = "ceci_stage"
+    CECI_STAGE_CALL = "ceci_stage_call"
 
     @property
     def is_data(self) -> bool:
@@ -15,4 +15,4 @@ class CeciNodeType(enum.Enum):
 
     @property
     def is_logic(self) -> bool:
-        return self == CeciNodeType.CECI_STAGE
+        return self == CeciNodeType.CECI_STAGE_CALL

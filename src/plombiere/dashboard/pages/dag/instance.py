@@ -39,10 +39,12 @@ _PLACEHOLDER = html.P(
 )
 
 
-def _kv_row(key, value):
+def _kv_row(key: str, value: Any) -> Any:
     return html.Div(
         [
-            html.Span(key, style={"fontWeight": "600", "color": "#555", "display": "block", "marginBottom": "2px"}),
+            html.Span(key, style={
+                "fontWeight": "600", "color": "#555", "display": "block", "marginBottom": "2px",
+            }),
             html.Span(
                 str(value) if value is not None else "—",
                 style={"wordBreak": "break-all", "color": "#333"},
@@ -89,7 +91,10 @@ def layout(**kwargs: Any) -> html.Div:
         ),
         html.Div(
             [
-                html.Div(id="dag-instance-graph-container", style={"flex": "1 1 0%", "minWidth": 0, "marginTop": "16px"}),
+                html.Div(
+                    id="dag-instance-graph-container",
+                    style={"flex": "1 1 0%", "minWidth": 0, "marginTop": "16px"},
+                ),
                 html.Div(id="dag-instance-detail-panel", children=_PLACEHOLDER, style=_DETAIL_PANEL_STYLE),
             ],
             style={"display": "flex", "gap": "0", "alignItems": "flex-start"},
@@ -155,7 +160,7 @@ clientside_callback(
     Input("dag-instance-rightclick-node", "data"),
     prevent_initial_call=True,
 )
-def show_instance_node_detail(node_data):
+def show_instance_node_detail(node_data: dict[str, Any] | None) -> Any:
     if not node_data:
         return _PLACEHOLDER
     node_type = node_data.get("node_type")
@@ -163,8 +168,8 @@ def show_instance_node_detail(node_data):
     try:
         from uuid import UUID
         provider = BackendProvider.get()
-        if node_type == "ceci_stage":
-            row = provider.get_ops("ceci_stage_node").get_row(UUID(node_id_str))
+        if node_type == "ceci_stage_call":
+            row = provider.get_ops("ceci_stage_call").get_row(UUID(node_id_str))
             title = f"Stage: {row.name or node_id_str}"
             fields = [
                 ("id", row.id_),
@@ -175,10 +180,9 @@ def show_instance_node_detail(node_data):
                 ("execution_id", row.execution_id),
                 ("overrides", row.overrides),
                 ("data_registry_id", row.data_registry_id),
-                ("ceci_stage_schema_node_id", row.ceci_stage_schema_node_id),
             ]
         elif node_type == "ceci_file":
-            row = provider.get_ops("ceci_file_node").get_row(UUID(node_id_str))
+            row = provider.get_ops("ceci_file").get_row(UUID(node_id_str))
             title = f"File: {row.arg_name or node_id_str}"
             fields = [
                 ("id", row.id_),
@@ -187,7 +191,6 @@ def show_instance_node_detail(node_data):
                 ("execution_id", row.execution_id),
                 ("data_registry_id", row.data_registry_id),
                 ("description", row.description),
-                ("ceci_file_schema_node_id", row.ceci_file_schema_node_id),
             ]
         else:
             return _PLACEHOLDER

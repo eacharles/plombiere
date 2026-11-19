@@ -24,9 +24,7 @@ from plombiere.dashboard.pages.crud._components import (
 FK_COLUMN_MAP: dict[str, str] = {
     "ceci_pipeline_id": "ceci_pipeline",
     "ceci_pipeline_variant_id": "ceci_pipeline_variant",
-    "ceci_stage_node_id": "ceci_stage_node",
-    "ceci_file_schema_node_id": "ceci_file_node",
-    "ceci_stage_schema_node_id": "ceci_stage_node",
+    "ceci_stage_node_id": "ceci_stage_call",
 }
 
 

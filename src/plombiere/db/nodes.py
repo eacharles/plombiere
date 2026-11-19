@@ -7,49 +7,46 @@ from pydantic import BaseModel
 from sqlalchemy import DateTime, Float, ForeignKey, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from tisserande.db.nodes import Node
+from tisserande.db.data_types import DataFileType
+from tisserande.db.function_types import ShellFunction
+from tisserande.db.nodes import DataFile, Node
 from tisserande.db_oper.nodes import register_node_type
 
 from .. import models
 
 
-class CeciFileNodeTable(Node):
+class CeciFileTable(DataFile):
     """ORM table for CECI file nodes.
 
-    Extends Node via 2-level joined-table inheritance: node → ceci_file_node.
+    Extends DataFile via 3-level joined-table inheritance:
+    node → data_file → ceci_file.
     """
 
-    __tablename__ = "ceci_file_node"
+    __tablename__ = "ceci_file"
     __mapper_args__ = {"polymorphic_identity": "ceci_file"}
 
-    uid_: Mapped[uuid.UUID] = mapped_column(ForeignKey("node.uid_"), primary_key=True)
-    creator: Mapped[str] = mapped_column(String(255), default="ceci")
-    file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    uid_: Mapped[uuid.UUID] = mapped_column(ForeignKey("data_file.uid_"), primary_key=True)
     description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     data_registry_id: Mapped[int | None] = mapped_column(nullable=True)
-    ceci_file_schema_node_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("ceci_file_node.uid_"),
-        nullable=True,
-    )
 
     @classmethod
     def pydantic_create_class(cls) -> type[BaseModel]:
-        return models.CeciFileNodeCreate
+        return models.CeciFileCreate
 
     @classmethod
     def pydantic_model_class(cls) -> type[BaseModel]:
-        return models.CeciFileNode
+        return models.CeciFile
 
     @classmethod
     def class_string(cls) -> str:
-        return "ceci_file_node"
+        return "ceci_file"
 
 
-class CeciStageNodeTable(Node):
+class CeciStageCallTable(Node):
     """ORM table for CECI stage nodes."""
 
-    __tablename__ = "ceci_stage_node"
-    __mapper_args__ = {"polymorphic_identity": "ceci_stage"}
+    __tablename__ = "ceci_stage_call"
+    __mapper_args__ = {"polymorphic_identity": "ceci_stage_call"}
 
     uid_: Mapped[uuid.UUID] = mapped_column(ForeignKey("node.uid_"), primary_key=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -58,32 +55,76 @@ class CeciStageNodeTable(Node):
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     data_registry_id: Mapped[int | None] = mapped_column(nullable=True)
-    ceci_stage_schema_node_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("ceci_stage_node.uid_"),
-        nullable=True,
-    )
-    ceci_pipeline_instance_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("ceci_pipeline_instance.id_"),
-        nullable=True,
-        index=True,
-    )
-    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     @classmethod
     def pydantic_create_class(cls) -> type[BaseModel]:
-        return models.CeciStageNodeCreate
+        return models.CeciStageCallCreate
 
     @classmethod
     def pydantic_model_class(cls) -> type[BaseModel]:
-        return models.CeciStageNode
+        return models.CeciStageCall
 
     @classmethod
     def class_string(cls) -> str:
-        return "ceci_stage_node"
+        return "ceci_stage_call"
 
 
-register_node_type("ceci_file", CeciFileNodeTable, models.CeciFileNodeCreate)
-register_node_type("ceci_stage", CeciStageNodeTable, models.CeciStageNodeCreate)
+register_node_type("ceci_file", CeciFileTable, models.CeciFileCreate)
+register_node_type("ceci_stage_call", CeciStageCallTable, models.CeciStageCallCreate)
+
+
+class CeciFileTypeTable(DataFileType):
+    """ORM table for the CeciFileType node template sub-type.
+
+    Extends DataFileType via 3-level joined-table inheritance:
+    node_template → data_file_type → ceci_file_node_type.
+    """
+
+    __tablename__ = "ceci_file_type"
+    __mapper_args__ = {"polymorphic_identity": "ceci_file_type"}
+
+    id_: Mapped[int] = mapped_column(ForeignKey("data_file_type.id_"), primary_key=True)
+    description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    @classmethod
+    def pydantic_create_class(cls) -> type[BaseModel]:
+        return models.CeciFileTypeCreate
+
+    @classmethod
+    def pydantic_model_class(cls) -> type[BaseModel]:
+        return models.CeciFileType
+
+    @classmethod
+    def class_string(cls) -> str:
+        return cls.__tablename__
+
+
+class CeciStageTable(ShellFunction):
+    """ORM table for the CeciStage node template sub-type.
+
+    Extends ShellFunction via 3-level joined-table inheritance:
+    node_template → shell_function → ceci_stage.
+    """
+
+    __tablename__ = "ceci_stage"
+    __mapper_args__ = {"polymorphic_identity": "ceci_stage"}
+
+    id_: Mapped[int] = mapped_column(ForeignKey("shell_function.id_"), primary_key=True)
+    python_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    @classmethod
+    def pydantic_create_class(cls) -> type[BaseModel]:
+        return models.CeciStageCreate
+
+    @classmethod
+    def pydantic_model_class(cls) -> type[BaseModel]:
+        return models.CeciStage
+
+    @classmethod
+    def class_string(cls) -> str:
+        return cls.__tablename__

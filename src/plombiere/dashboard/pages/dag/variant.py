@@ -1,5 +1,7 @@
 """Variant DAG page — same topology as the parent pipeline, orange nodes have config overrides."""
 
+from typing import Any
+
 import dash
 import dash_cytoscape as cyto
 from dash import Input, Output, State, callback, clientside_callback, dcc, html
@@ -40,13 +42,16 @@ def _kv_row(key, value):
     )
 
 
-def layout(**kwargs):
+def layout(**kwargs: Any) -> html.Div:
     try:
         provider = BackendProvider.get()
         variants = provider.get_ops("ceci_pipeline_variant").get_rows()
         pipelines = {p.id_: p.name for p in provider.get_ops("ceci_pipeline").get_rows()}
         options = [
-            {"label": f"{v.name}  (pipeline: {pipelines.get(v.ceci_pipeline_id, v.ceci_pipeline_id)})", "value": v.id_}
+            {
+                "label": f"{v.name}  (pipeline: {pipelines.get(v.ceci_pipeline_id, v.ceci_pipeline_id)})",
+                "value": v.id_,
+            }
             for v in variants
         ]
     except Exception:
@@ -90,7 +95,7 @@ def layout(**kwargs):
     Output("dag-variant-graph-container", "children"),
     Input("dag-variant-select", "value"),
 )
-def render_variant_dag(variant_id):
+def render_variant_dag(variant_id: Any) -> Any:
     if variant_id is None:
         return html.P("Select a variant above.", style={"color": "#888", "fontStyle": "italic"})
     try:

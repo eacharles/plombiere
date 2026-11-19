@@ -12,9 +12,8 @@ config = CrudPageConfig(
     display_name="CECI File Nodes",
     response_model=CeciFileNode,
     create_model=None,
-    table_columns=["id_", "type_", "arg_name", "execution_id", "path"],
+    table_columns=["uid_", "node_type", "file_path", "creator"],
     has_create=False,
-    foreign_keys={"execution_id": "execution"},
 )
 
 layout = make_crud_layout(config)

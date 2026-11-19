@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -21,8 +22,6 @@ from plombiere.dashboard.pages.crud._components import (
 
 # Maps FK column names to entity names recognised by BackendProvider.get_ops()
 FK_COLUMN_MAP: dict[str, str] = {
-    "execution_id": "execution",
-    "parent_execution_id": "execution",
     "ceci_pipeline_id": "ceci_pipeline",
     "ceci_pipeline_variant_id": "ceci_pipeline_variant",
     "ceci_stage_node_id": "ceci_stage_node",
@@ -96,11 +95,11 @@ class CrudPageConfig:
     dag_path: str | None = None
 
 
-def make_crud_layout(config: CrudPageConfig):
+def make_crud_layout(config: CrudPageConfig) -> Callable[..., html.Div]:
     """Generate the page layout function for a CRUD entity."""
     prefix = config.entity_name
 
-    def layout_fn(**kwargs):
+    def layout_fn(**kwargs: Any) -> html.Div:
         children = [
             html.H2(config.display_name),
             html.Hr(),
@@ -134,7 +133,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
         Input(f"{prefix}-refresh-btn", "n_clicks"),
         prevent_initial_call=False,
     )
-    def refresh_table(n_clicks):
+    def refresh_table(n_clicks: Any) -> Any:
         try:
             ops = BackendProvider.get().get_ops(config.entity_name)
             rows = ops.get_rows()
@@ -150,7 +149,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
         Input(f"{prefix}-filter-input", "value"),
         Input(f"{prefix}-all-data", "data"),
     )
-    def filter_table(filter_text, all_data):
+    def filter_table(filter_text: Any, all_data: Any) -> Any:
         if not all_data:
             return []
         if not filter_text:
@@ -170,7 +169,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
         State(f"{prefix}-detail-modal", "style"),
         prevent_initial_call=True,
     )
-    def show_detail(cell_clicked, close_clicks, row_data_list, modal_style):
+    def show_detail(cell_clicked: Any, close_clicks: Any, row_data_list: Any, modal_style: Any) -> Any:
         triggered_prop = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
         if "detail-close" in triggered_prop:
             return {**modal_style, "display": "none"}, no_update, no_update
@@ -197,7 +196,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
                 ops = provider.get_ops(config.entity_name)
                 full_row = ops.get_row(row_id)
                 title = f"{config.display_name}: {getattr(full_row, 'name', row_id)}"
-                content = _build_detail_content(full_row)
+                content: Any = _build_detail_content(full_row)
             else:
                 ref_entity = FK_COLUMN_MAP[col_id]
                 ref_id = _parse_id(row_data.get(col_id))
@@ -222,7 +221,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
             State(f"{prefix}-create-modal", "style"),
             prevent_initial_call=True,
         )
-        def toggle_modal(open_clicks, close_clicks, current_style):
+        def toggle_modal(open_clicks: Any, close_clicks: Any, current_style: Any) -> Any:
             if ctx.triggered_id == f"{prefix}-create-btn":
                 return {**current_style, "display": "block"}
             return {**current_style, "display": "none"}
@@ -238,7 +237,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
             State(f"{prefix}-refresh-btn", "n_clicks"),
             prevent_initial_call=True,
         )
-        def create_entity(n_clicks, *args):
+        def create_entity(n_clicks: Any, *args: Any) -> Any:
             field_values = args[: len(field_names)]
             refresh_clicks = args[-1]
 
@@ -281,7 +280,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
         State(f"{prefix}-refresh-btn", "n_clicks"),
         prevent_initial_call=True,
     )
-    def delete_entity(n_clicks, selected_rows, refresh_clicks):
+    def delete_entity(n_clicks: Any, selected_rows: Any, refresh_clicks: Any) -> Any:
         if not selected_rows:
             return html.Span("No row selected.", style={"color": "orange"}), no_update
 

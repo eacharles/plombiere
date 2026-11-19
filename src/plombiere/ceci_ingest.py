@@ -3,7 +3,7 @@
 Two main entry points:
 
 ``register_pipeline_from_yaml``
-    Reads a CECI pipeline YAML and populates schema-level (execution_id=None)
+    Reads a CECI pipeline YAML and populates schema-level (no pipeline instance)
     CeciStageNode records — one per unique stage class.
 
 ``register_pipeline_variant_from_yaml``
@@ -12,12 +12,16 @@ Two main entry points:
 
 ``ingest_stage_logs``
     Reads a directory of ``{stage_name}.out`` log files produced by a CECI
-    pipeline run and creates one Execution + one instance CeciStageNode per
-    file, plus CeciFileNode instances and edges for every file handle logged.
+    pipeline run and creates one instance CeciStageNode per file, plus
+    CeciFileNode instances and edges for every file handle logged.
 
 Usage::
 
-    from plombiere.ceci_ingest import register_pipeline_from_yaml, register_pipeline_variant_from_yaml, ingest_stage_logs
+    from plombiere.ceci_ingest import (
+        register_pipeline_from_yaml,
+        register_pipeline_variant_from_yaml,
+        ingest_stage_logs,
+    )
     from plombiere.local_sync import ceci_pipeline as pipeline_ops
     from tisserande.db.base import init_db
 
@@ -25,13 +29,12 @@ Usage::
     pipeline_create, schema_nodes = register_pipeline_from_yaml("pz_dp1_6band.yaml")
     pipeline_row = pipeline_ops.create_row(**pipeline_create.model_dump())
     variant = register_pipeline_variant_from_yaml("pz_dp1_6band_config.yml", pipeline_row.id_)
-    pipeline_exec, instance, results = ingest_stage_logs(
+    instance, results = ingest_stage_logs(
         "logs/", schema_nodes=schema_nodes, pipeline_variant=variant
     )
-    print(pipeline_exec.status, pipeline_exec.duration_seconds)
-    print(instance.id_)
-    for exec_, stage_node, file_nodes in results:
-        print(exec_.status, stage_node.name, len(file_nodes))
+    print(instance.status, instance.run_date)
+    for stage_node, file_nodes in results:
+        print(stage_node.status, stage_node.name, len(file_nodes))
 """
 
 from __future__ import annotations
@@ -46,10 +49,8 @@ from uuid import UUID
 import yaml
 
 from tisserande.local_sync import edge as edge_ops
-from tisserande.local_sync import execution as execution_ops
 from tisserande.local_sync import node as node_ops
 from tisserande.models.edges import EdgeCreate
-from tisserande.models.execution import Execution, ExecutionCreate
 from tisserande.models.types import ExecutionStatus
 
 from .local_sync import ceci_pipeline_instance as instance_ops
@@ -224,7 +225,7 @@ def register_pipeline_variant_from_yaml(
 
 def stage_node_ids(stage_nodes: list[CeciStageNode]) -> list[UUID]:
     """Extract IDs from a list of stage nodes (convenience for building assoc records)."""
-    return [n.id_ for n in stage_nodes]
+    return [n.uid_ for n in stage_nodes]
 
 
 # ---------------------------------------------------------------------------
@@ -289,16 +290,16 @@ def ingest_stage_logs(
     *,
     schema_nodes: list[CeciStageNode] | None = None,
     pipeline_variant: CeciPipelineVariant | None = None,
-) -> tuple[Execution, CeciPipelineInstance | None, list[tuple[Execution, CeciStageNode, list[CeciFileNode]]]]:
+) -> tuple[CeciPipelineInstance | None, list[tuple[CeciStageNode, list[CeciFileNode]]]]:
     """Read a directory of CECI stage log files and write execution records.
 
-    Creates one pipeline-level ``Execution`` and for each ``{stage_name}.out``
-    file creates a stage ``Execution``, a ``CeciStageNode`` instance, one
-    ``CeciFileNode`` per logged file handle, and connecting ``Edge`` records.
+    Creates one ``CeciStageNode`` instance per ``{stage_name}.out`` file (with
+    status and timing embedded), one ``CeciFileNode`` per logged file handle,
+    and connecting ``Edge`` records.
 
     If *pipeline_variant* is given a ``CeciPipelineInstance`` is also created
-    and linked to that variant, using the pipeline's inferred status and start
-    date.
+    and linked to that variant.  Stage nodes are linked back to the pipeline
+    instance via their ``ceci_pipeline_instance_id`` field.
 
     Parameters
     ----------
@@ -311,10 +312,9 @@ def ingest_stage_logs(
 
     Returns
     -------
-    ``(pipeline_execution, pipeline_instance, stage_results)`` where
-    *pipeline_instance* is ``None`` when *pipeline_variant* is not given, and
-    ``stage_results`` is a list of ``(Execution, CeciStageNode,
-    list[CeciFileNode])`` triples.
+    ``(pipeline_instance, stage_results)`` where *pipeline_instance* is ``None``
+    when *pipeline_variant* is not given, and ``stage_results`` is a list of
+    ``(CeciStageNode, list[CeciFileNode])`` pairs.
     """
     log_dir = Path(log_dir)
     schema_by_classname: dict[str, CeciStageNode] = {}
@@ -333,62 +333,40 @@ def ingest_stage_logs(
         raise ValueError(f"No parseable stage log files found in {log_dir}")
 
     pipeline_start = min(r.start_time for r in records)
-    pipeline_end = max(r.end_time for r in records)
-    pipeline_duration = (pipeline_end - pipeline_start).total_seconds()
     any_failed = any(r.status == ExecutionStatus.FAILURE for r in records)
     pipeline_status = ExecutionStatus.FAILURE if any_failed else ExecutionStatus.SUCCESS
-
-    pipeline_exec_row = execution_ops.create_row(
-        **ExecutionCreate(
-            status=pipeline_status,
-            start_time=pipeline_start,
-            end_time=pipeline_end,
-            duration_seconds=pipeline_duration,
-        ).model_dump()
-    )
-    pipeline_execution_id: UUID = pipeline_exec_row.id_
 
     pipeline_instance: CeciPipelineInstance | None = None
     if pipeline_variant is not None:
         instance_row = instance_ops.create_row(
             status=pipeline_status.value,
             run_date=pipeline_start.date(),
-            execution_id=pipeline_exec_row.id_,
             ceci_pipeline_variant_id=pipeline_variant.id_,
         )
         pipeline_instance = CeciPipelineInstance.model_validate(instance_row)
 
-    stage_results: list[tuple[Execution, CeciStageNode, list[CeciFileNode]]] = []
+    stage_results: list[tuple[CeciStageNode, list[CeciFileNode]]] = []
 
     for record in records:
-        exec_row = execution_ops.create_row(
-            **ExecutionCreate(
-                status=record.status,
-                start_time=record.start_time,
-                end_time=record.end_time,
-                duration_seconds=record.duration_seconds,
-                parent_execution_id=pipeline_execution_id,
-            ).model_dump()
-        )
-
         schema_node = schema_by_classname.get(record.classname)
         stage_row = node_ops.create_row(
             **CeciStageNodeCreate(
                 name=record.instance_name,
-                execution_id=exec_row.id_,
-                ceci_stage_schema_node_id=schema_node.id_ if schema_node else None,
+                status=record.status,
+                start_time=record.start_time,
+                end_time=record.end_time,
+                duration_seconds=record.duration_seconds,
+                ceci_stage_schema_node_id=schema_node.uid_ if schema_node else None,
+                ceci_pipeline_instance_id=pipeline_instance.id_ if pipeline_instance else None,
             ).model_dump()
         )
-
-        execution_ops.update_row(exec_row.id_, function_node_id=stage_row.id_)
+        stage_node = CeciStageNode.model_validate(stage_row)
 
         file_nodes: list[CeciFileNode] = []
         for handle in record.file_handles:
             file_row = node_ops.create_row(
                 **CeciFileNodeCreate(
-                    path=handle.path,
-                    arg_name=handle.tag,
-                    execution_id=exec_row.id_,
+                    file_path=handle.path,
                 ).model_dump()
             )
             file_node = CeciFileNode.model_validate(file_row)
@@ -397,22 +375,18 @@ def ingest_stage_logs(
             if handle.is_output:
                 edge_ops.create_row(
                     **EdgeCreate(
-                        from_id=stage_row.id_,
-                        to_id=file_row.id_,
-                        execution_id=exec_row.id_,
+                        from_id=stage_row.uid_,
+                        to_id=file_row.uid_,
                     ).model_dump()
                 )
             else:
                 edge_ops.create_row(
                     **EdgeCreate(
-                        from_id=file_row.id_,
-                        to_id=stage_row.id_,
-                        execution_id=exec_row.id_,
+                        from_id=file_row.uid_,
+                        to_id=stage_row.uid_,
                     ).model_dump()
                 )
 
-        exec_response = Execution.model_validate(exec_row)
-        stage_response = CeciStageNode.model_validate(stage_row)
-        stage_results.append((exec_response, stage_response, file_nodes))
+        stage_results.append((stage_node, file_nodes))
 
-    return Execution.model_validate(pipeline_exec_row), pipeline_instance, stage_results
+    return pipeline_instance, stage_results

@@ -137,7 +137,8 @@ class TestCrudCreateModal:
         dash_duo.find_element("#ceci_pipeline-create-btn").click()
         dash_duo.wait_for_element("#ceci_pipeline-create-modal", timeout=_TIMEOUT)
         dash_duo.find_element("#ceci_pipeline-modal-close").click()
-        import time; time.sleep(0.5)
+        import time
+        time.sleep(0.5)
         assert not dash_duo.find_element("#ceci_pipeline-create-modal").is_displayed()
 
 

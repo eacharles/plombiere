@@ -31,7 +31,7 @@ def build_filter_bar(prefix: str) -> html.Div:
     )
 
 
-def build_data_table(table_id: str, columns: list[str], multi_select: bool = False) -> dag.AgGrid:
+def build_data_table(table_id: str, columns: list[str], multi_select: bool = False) -> dag.AgGrid:  # noqa: FBT001, FBT002
     """Create a configured AG Grid for entity display."""
     clickable_cols = {c for c in columns if c == "name" or (c.endswith("_id") and c != "id_")}
 
@@ -144,7 +144,7 @@ def build_form_fields(
                 value=["true"] if field_info.default else [],
             )
         elif annotation is int:
-            input_el = dcc.Input(id=field_id, type="number", placeholder=description)
+            input_el = dcc.Input(id=field_id, type="number", placeholder=description)  # type: ignore[unreachable]
         elif annotation is dict or str(annotation).startswith("dict"):
             input_el = dcc.Textarea(
                 id=field_id,
@@ -251,7 +251,7 @@ _DAG_BTN_STYLE: dict = {
 }
 
 
-def build_action_bar(entity_name: str, has_create: bool = True, dag_path: str | None = None) -> html.Div:
+def build_action_bar(entity_name: str, has_create: bool = True, dag_path: str | None = None) -> html.Div:  # noqa: FBT001, FBT002
     """Build the action bar with Create/Delete/Refresh buttons."""
     prefix = entity_name
     buttons = [

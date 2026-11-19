@@ -24,7 +24,7 @@ class CeciPipelineStageAssocTable(Base):
         index=True,
     )
     ceci_stage_node_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("node.id_"),
+        ForeignKey("node.uid_"),
         nullable=False,
         index=True,
     )

@@ -99,16 +99,15 @@ class TestCeciNodeTypes:
             name="FlexZBoostEstimator",
             python_path="rail.estimation.algos.flexzboost.FlexZBoostEstimator",
         )
-        assert obj.type_ == "ceci_stage"
+        assert obj.node_type == "ceci_stage"
         assert obj.python_path == "rail.estimation.algos.flexzboost.FlexZBoostEstimator"
 
     def test_ceci_file_node_create(self):
         obj = CeciFileNodeCreate(
-            path="/tmp/output.hdf5",
-            arg_name="output",
+            file_path="/tmp/output.hdf5",
         )
-        assert obj.type_ == "ceci_file"
-        assert obj.arg_name == "output"
+        assert obj.node_type == "ceci_file"
+        assert obj.file_path == "/tmp/output.hdf5"
 
 
 # ---------------------------------------------------------------------------
@@ -172,16 +171,16 @@ class TestCeciPipelineLayer:
             name="pz_v4", description="", structure={}, config={}
         )
         stage_node_row = node.create_row(
-            type_="ceci_stage",
+            node_type="ceci_stage",
             name="FZBoost",
             python_path="rail.algos.FZBoost",
         )
         assoc_row = ceci_pipeline_stage_assoc.create_row(
             ceci_pipeline_id=pipeline_row.id_,
-            ceci_stage_node_id=stage_node_row.id_,
+            ceci_stage_node_id=stage_node_row.uid_,
         )
         assert assoc_row.ceci_pipeline_id == pipeline_row.id_
-        assert str(assoc_row.ceci_stage_node_id) == str(stage_node_row.id_)
+        assert str(assoc_row.ceci_stage_node_id) == str(stage_node_row.uid_)
 
 
 # ---------------------------------------------------------------------------
@@ -326,51 +325,44 @@ class TestIngestStageLogs:
         from plombiere.ceci_ingest import ingest_stage_logs
         from tisserande.local_sync import edge
 
-        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_success)
-
-        assert pipeline_exec.status == ExecutionStatus.SUCCESS
-        assert pipeline_exec.duration_seconds is not None
+        _, stage_results = ingest_stage_logs(log_dir_success)
 
         assert len(stage_results) == 1
-        exec_, stage_node, file_nodes = stage_results[0]
-        assert exec_.status == ExecutionStatus.SUCCESS
-        assert exec_.parent_execution_id == pipeline_exec.id_
-        assert stage_node.type_ == "ceci_stage"
+        stage_node, file_nodes = stage_results[0]
+        assert stage_node.status == ExecutionStatus.SUCCESS
+        assert stage_node.node_type == "ceci_stage"
 
         assert len(file_nodes) == 3
-        tags = {fn.arg_name for fn in file_nodes}
-        assert tags == {"model", "input", "output"}
 
         edges = edge.get_rows()
-        from_stage = [e for e in edges if str(e.from_id) == str(stage_node.id_)]
+        from_stage = [e for e in edges if str(e.from_id) == str(stage_node.uid_)]
         assert any(True for e in from_stage)
 
     def test_inprogress_stripped_from_output_path(self, log_dir_success: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        _, _, stage_results = ingest_stage_logs(log_dir_success)
-        _, _, file_nodes = stage_results[0]
-        paths = {fn.path for fn in file_nodes}
-        assert not any("inprogress_" in p for p in paths)
+        _, stage_results = ingest_stage_logs(log_dir_success)
+        _, file_nodes = stage_results[0]
+        paths = {fn.file_path for fn in file_nodes}
+        assert not any("inprogress_" in p for p in paths if p)
         assert "/pz/data/output.hdf5" in paths
 
     def test_failure_log_sets_failure_status(self, log_dir_mixed: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_mixed)
-        assert pipeline_exec.status == ExecutionStatus.FAILURE
-        statuses = {exec_.status for exec_, _, _ in stage_results}
+        _, stage_results = ingest_stage_logs(log_dir_mixed)
+        statuses = {sn.status for sn, _ in stage_results}
         assert ExecutionStatus.FAILURE in statuses
         assert ExecutionStatus.SUCCESS in statuses
 
-    def test_pipeline_exec_spans_all_stages(self, log_dir_mixed: Path):
+    def test_stage_timing_recorded(self, log_dir_mixed: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_mixed)
-        start_times = [exec_.start_time for exec_, _, _ in stage_results]
-        end_times = [exec_.end_time for exec_, _, _ in stage_results]
-        assert pipeline_exec.start_time == min(start_times)
-        assert pipeline_exec.end_time == max(end_times)
+        _, stage_results = ingest_stage_logs(log_dir_mixed)
+        for stage_node, _ in stage_results:
+            assert stage_node.start_time is not None
+            assert stage_node.end_time is not None
+            assert stage_node.duration_seconds is not None
 
     def test_empty_log_dir_raises(self, log_dir_empty: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
@@ -382,23 +374,10 @@ class TestIngestStageLogs:
         from plombiere.ceci_ingest import ingest_stage_logs, register_pipeline_from_yaml
 
         _, schema_nodes = register_pipeline_from_yaml(pipeline_yaml_file)
-        _, _, stage_results = ingest_stage_logs(log_dir_success, schema_nodes=schema_nodes)
+        _, stage_results = ingest_stage_logs(log_dir_success, schema_nodes=schema_nodes)
 
-        _, stage_node, _ = stage_results[0]
+        stage_node, _ = stage_results[0]
         assert stage_node.ceci_stage_schema_node_id is not None
-
-    def test_stage_exec_links_to_pipeline_exec(self, log_dir_success: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-        from tisserande.local_sync import execution as execution_ops
-
-        pipeline_exec, _, stage_results = ingest_stage_logs(log_dir_success)
-
-        all_executions = execution_ops.get_rows()
-        pipeline_ids = {str(e.id_) for e in all_executions if e.parent_execution_id is None}
-        assert str(pipeline_exec.id_) in pipeline_ids
-
-        stage_exec, _, _ = stage_results[0]
-        assert str(stage_exec.parent_execution_id) == str(pipeline_exec.id_)
 
 
 class TestIngestStageLogsWithVariant:
@@ -413,55 +392,54 @@ class TestIngestStageLogsWithVariant:
     def test_returns_instance_when_variant_given(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        _, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
         assert instance is not None
         assert instance.id_ is not None
 
     def test_instance_links_to_variant(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        _, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
         assert instance.ceci_pipeline_variant_id == variant.id_
 
-    def test_instance_status_matches_pipeline(self, log_dir_success: Path, variant):
+    def test_instance_status_success(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance.status == pipeline_exec.status
+        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance.status == ExecutionStatus.SUCCESS
 
     def test_instance_run_date_from_log_start(self, log_dir_success: Path, variant):
-        from datetime import date
-
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance.run_date == pipeline_exec.start_time.date()
+        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        assert instance.run_date == date(2025, 7, 20)
 
     def test_instance_persisted(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
         from plombiere.local_sync import ceci_pipeline_instance
 
-        _, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
         rows = ceci_pipeline_instance.get_rows()
         assert any(str(r.id_) == str(instance.id_) for r in rows)
 
     def test_no_variant_returns_none_instance(self, log_dir_success: Path):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        _, instance, _ = ingest_stage_logs(log_dir_success)
+        instance, _ = ingest_stage_logs(log_dir_success)
         assert instance is None
 
     def test_failure_pipeline_instance_status(self, log_dir_mixed: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        _, instance, _ = ingest_stage_logs(log_dir_mixed, pipeline_variant=variant)
+        instance, _ = ingest_stage_logs(log_dir_mixed, pipeline_variant=variant)
         assert instance.status == ExecutionStatus.FAILURE
 
-    def test_instance_has_execution_id(self, log_dir_success: Path, variant):
+    def test_stage_nodes_linked_to_instance(self, log_dir_success: Path, variant):
         from plombiere.ceci_ingest import ingest_stage_logs
 
-        pipeline_exec, instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance.execution_id == pipeline_exec.id_
+        instance, stage_results = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
+        for stage_node, _ in stage_results:
+            assert str(stage_node.ceci_pipeline_instance_id) == str(instance.id_)
 
 
 class TestRegisterPipelineVariantFromYaml:

@@ -10,7 +10,7 @@ from .layout import create_layout
 cyto.load_extra_layouts()
 
 
-def create_app(debug: bool = False) -> Dash:
+def create_app(debug: bool = False) -> Dash:  # noqa: FBT001, FBT002
     """Create the multi-page Dash application."""
     pages_dir = Path(__file__).parent / "pages"
     assets_dir = Path(__file__).parent / "assets"

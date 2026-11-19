@@ -1,5 +1,7 @@
 """Instance DAG page — shows actual stage and file nodes from a pipeline run."""
 
+from typing import Any
+
 import dash
 import dash_cytoscape as cyto
 from dash import Input, Output, State, callback, clientside_callback, dcc, html
@@ -50,14 +52,18 @@ def _kv_row(key, value):
     )
 
 
-def layout(**kwargs):
+def layout(**kwargs: Any) -> html.Div:
     try:
         provider = BackendProvider.get()
         instances = provider.get_ops("ceci_pipeline_instance").get_rows()
         variants = {v.id_: v.name for v in provider.get_ops("ceci_pipeline_variant").get_rows()}
         options = [
             {
-                "label": f"{i.run_date} — {str(i.status.value if hasattr(i.status, 'value') else i.status)}  ({variants.get(i.ceci_pipeline_variant_id, '')})",
+                "label": (
+                    f"{i.run_date} — "
+                    f"{str(i.status.value if hasattr(i.status, 'value') else i.status)}"
+                    f"  ({variants.get(i.ceci_pipeline_variant_id, '')})"
+                ),
                 "value": str(i.id_),
             }
             for i in instances
@@ -98,7 +104,7 @@ def layout(**kwargs):
     Output("dag-instance-graph-container", "children"),
     Input("dag-instance-select", "value"),
 )
-def render_instance_dag(instance_id_str):
+def render_instance_dag(instance_id_str: Any) -> Any:
     if instance_id_str is None:
         return html.P("Select an instance above.", style={"color": "#888", "fontStyle": "italic"})
     try:
@@ -106,12 +112,7 @@ def render_instance_dag(instance_id_str):
 
         provider = BackendProvider.get()
         instance = provider.get_ops("ceci_pipeline_instance").get_row(UUID(instance_id_str))
-        if instance.execution_id is None:
-            return html.P(
-                "This instance has no linked execution record — it was ingested before execution tracking was added.",
-                style={"color": "#888"},
-            )
-        elements = instance_elements(instance.execution_id)
+        elements = instance_elements(instance.id_)
         if not elements:
             return html.P("No nodes found for this instance.")
         return html.Div([
@@ -120,7 +121,12 @@ def render_instance_dag(instance_id_str):
                 id="dag-instance-graph",
                 elements=elements,
                 layout=DAG_LAYOUT,
-                style={"width": "100%", "height": "680px", "border": "1px solid #dee2e6", "borderRadius": "4px"},
+                style={
+                    "width": "100%",
+                    "height": "680px",
+                    "border": "1px solid #dee2e6",
+                    "borderRadius": "4px",
+                },
                 stylesheet=STYLESHEET,
             ),
         ])

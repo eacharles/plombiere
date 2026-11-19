@@ -160,7 +160,12 @@ def pipeline_elements(
                 if edge not in seen_edges:
                     seen_edges.add(edge)
                     elements.append({
-                        "data": {"id": f"{edge[0]}--{edge[1]}", "source": edge[0], "target": edge[1], "label": ""}
+                        "data": {
+                            "id": f"{edge[0]}--{edge[1]}",
+                            "source": edge[0],
+                            "target": edge[1],
+                            "label": "",
+                        }
                     })
 
     return elements
@@ -170,46 +175,44 @@ def pipeline_elements(
 # Instance graph (from DB execution records)
 # ---------------------------------------------------------------------------
 
-def instance_elements(execution_id: UUID | str) -> list[dict[str, Any]]:
-    """Build Cytoscape elements from a pipeline instance's execution records.
+def instance_elements(pipeline_instance_id: UUID | str) -> list[dict[str, Any]]:
+    """Build Cytoscape elements from a pipeline instance's stage nodes.
 
-    Stage nodes are coloured by per-stage execution status. File nodes are
-    shown as ellipses labelled by arg_name or file basename.
+    Stage nodes are coloured by their embedded execution status. File nodes are
+    shown as ellipses labelled by file basename.
     """
     from tisserande.local_sync import edge as edge_ops
-    from tisserande.local_sync import execution as exec_ops
 
     from plombiere.backend import BackendProvider
 
     provider = BackendProvider.get()
-    exec_id_str = str(execution_id)
-
-    all_execs = exec_ops.get_rows()
-    exec_status_map: dict[str, Any] = {str(e.id_): e.status for e in all_execs}
-    stage_exec_ids: set[str] = {
-        str(e.id_)
-        for e in all_execs
-        if e.parent_execution_id and str(e.parent_execution_id) == exec_id_str
-    }
+    instance_id_str = str(pipeline_instance_id)
 
     stage_nodes = [
         n for n in provider.get_ops("ceci_stage_node").get_rows()
-        if n.execution_id and str(n.execution_id) in stage_exec_ids
+        if n.ceci_pipeline_instance_id and str(n.ceci_pipeline_instance_id) == instance_id_str
     ]
+
+    stage_node_ids_set: set[str] = {str(n.uid_) for n in stage_nodes}
+
     file_nodes = [
         n for n in provider.get_ops("ceci_file_node").get_rows()
-        if n.execution_id and str(n.execution_id) in stage_exec_ids
+        if any(
+            str(e.from_id) in stage_node_ids_set or str(e.to_id) in stage_node_ids_set
+            for e in edge_ops.get_rows()
+            if str(e.from_id) == str(n.uid_) or str(e.to_id) == str(n.uid_)
+        )
     ]
 
     node_ids: set[str] = set()
     elements: list[dict[str, Any]] = []
 
     for n in stage_nodes:
-        nid = str(n.id_)
+        nid = str(n.uid_)
         node_ids.add(nid)
-        raw_status = exec_status_map.get(str(n.execution_id))
+        raw_status = n.status
         status_str = (
-            raw_status.value if hasattr(raw_status, "value") else str(raw_status)
+            raw_status.value if hasattr(raw_status, "value") else str(raw_status or "pending")
         ).lower()
         elements.append({
             "data": {
@@ -224,12 +227,10 @@ def instance_elements(execution_id: UUID | str) -> list[dict[str, Any]]:
         })
 
     for n in file_nodes:
-        nid = str(n.id_)
+        nid = str(n.uid_)
         node_ids.add(nid)
-        if n.arg_name:
-            label = n.arg_name
-        elif n.path:
-            label = Path(n.path).name
+        if n.file_path:
+            label = Path(n.file_path).name
         else:
             label = nid[:8]
         elements.append({

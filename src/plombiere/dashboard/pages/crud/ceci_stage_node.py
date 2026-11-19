@@ -12,9 +12,8 @@ config = CrudPageConfig(
     display_name="CECI Stage Nodes",
     response_model=CeciStageNode,
     create_model=None,
-    table_columns=["id_", "type_", "arg_name", "execution_id"],
+    table_columns=["uid_", "node_type", "name", "status"],
     has_create=False,
-    foreign_keys={"execution_id": "execution"},
 )
 
 layout = make_crud_layout(config)

@@ -17,7 +17,11 @@ Two main entry points:
 
 Usage::
 
-    from plombiere.ceci_ingest import register_pipeline_from_yaml, register_pipeline_variant_from_yaml, ingest_stage_logs
+    from plombiere.ceci_ingest import (
+        register_pipeline_from_yaml,
+        register_pipeline_variant_from_yaml,
+        ingest_stage_logs,
+    )
     from plombiere.local_sync import ceci_pipeline as pipeline_ops
     from tisserande.db.base import init_db
 

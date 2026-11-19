@@ -1,5 +1,7 @@
 """Pipeline DAG page — shows stage topology from the pipeline YAML structure."""
 
+from typing import Any
+
 import dash
 import dash_cytoscape as cyto
 from dash import Input, Output, State, callback, clientside_callback, dcc, html
@@ -40,7 +42,7 @@ def _kv_row(key, value):
     )
 
 
-def layout(**kwargs):
+def layout(**kwargs: Any) -> html.Div:
     try:
         ops = BackendProvider.get().get_ops("ceci_pipeline")
         options = [{"label": p.name, "value": p.id_} for p in ops.get_rows()]
@@ -85,7 +87,7 @@ def layout(**kwargs):
     Output("dag-pipeline-graph-container", "children"),
     Input("dag-pipeline-select", "value"),
 )
-def render_pipeline_dag(pipeline_id):
+def render_pipeline_dag(pipeline_id: Any) -> Any:
     if pipeline_id is None:
         return html.P("Select a pipeline above.", style={"color": "#888", "fontStyle": "italic"})
     try:

@@ -6,7 +6,7 @@ from plombiere.dashboard import create_app
 
 def main(
     port: int = 8050,
-    debug: bool = True,
+    debug: bool = True,  # noqa: FBT001, FBT002
     db_url: str = "sqlite+aiosqlite:///plombiere.db",
 ) -> None:
     settings = BackendSettings(db_url=db_url)

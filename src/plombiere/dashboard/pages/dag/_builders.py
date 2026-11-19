@@ -160,7 +160,12 @@ def pipeline_elements(
                 if edge not in seen_edges:
                     seen_edges.add(edge)
                     elements.append({
-                        "data": {"id": f"{edge[0]}--{edge[1]}", "source": edge[0], "target": edge[1], "label": ""}
+                        "data": {
+                            "id": f"{edge[0]}--{edge[1]}",
+                            "source": edge[0],
+                            "target": edge[1],
+                            "label": "",
+                        }
                     })
 
     return elements

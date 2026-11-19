@@ -25,11 +25,14 @@ class CeciFileNodeBase(BaseModel):
     """Model for a CECI file node.
 
     Schema nodes (ceci_pipeline_instance_id=None) represent file type definitions.
-    Instance nodes (ceci_pipeline_instance_id set) represent specific files consumed or produced by a stage run.
+    Instance nodes (ceci_pipeline_instance_id set) represent specific files consumed or
+    produced by a stage run.
     """
 
     node_type: Literal["ceci_file"] = "ceci_file"
-    file_path: str | None = Field(default=None, description="File path (instance nodes) or None (schema nodes)")
+    file_path: str | None = Field(
+        default=None, description="File path (instance nodes) or None (schema nodes)"
+    )
     creator: str = Field(default="ceci", description="Identifier of who or what created this data")
     description: str | None = Field(default=None, description="Description of the file type (schema nodes)")
     data_registry_id: int | None = Field(

@@ -21,7 +21,7 @@ def cli() -> None:
     default="sqlite+aiosqlite:///plombiere.db",
     help="SQLAlchemy async database URL",
 )
-def dashboard(port: int, debug: bool, db_url: str) -> None:
+def dashboard(port: int, debug: bool, db_url: str) -> None:  # noqa: FBT001
     """Launch the Plombiere dashboard."""
     from plombiere.app import main
     main(port=port, debug=debug, db_url=db_url)

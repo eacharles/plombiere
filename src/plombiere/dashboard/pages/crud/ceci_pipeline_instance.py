@@ -12,7 +12,7 @@ config = CrudPageConfig(
     display_name="CECI Pipeline Instances",
     response_model=CeciPipelineInstance,
     create_model=CeciPipelineInstanceCreate,
-    table_columns=["id_", "status", "run_date", "execution_id", "ceci_pipeline_variant_id"],
+    table_columns=["id_", "status", "run_date", "ceci_pipeline_variant_id"],
     foreign_keys={"ceci_pipeline_variant_id": "ceci_pipeline_variant"},
     dag_path="/dag/instance",
 )

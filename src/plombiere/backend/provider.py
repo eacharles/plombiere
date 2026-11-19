@@ -20,7 +20,7 @@ class _TypeFilteredNodeOps:
         self._type = type_value
 
     def get_rows(self) -> list[Any]:
-        return [r for r in self._ops.get_rows() if str(r.type_) == self._type]
+        return [r for r in self._ops.get_rows() if str(r.node_type) == self._type]
 
     def count_rows(self) -> int:
         return len(self.get_rows())
@@ -88,7 +88,6 @@ class BackendProvider:
         ops_map: dict[str, Any] = {
             "node": ts_sync.node,
             "edge": ts_sync.edge,
-            "execution": ts_sync.execution,
             "ceci_file_node": _TypeFilteredNodeOps(ts_sync.node, "ceci_file"),
             "ceci_stage_node": _TypeFilteredNodeOps(ts_sync.node, "ceci_stage"),
             "ceci_pipeline": pl_sync.ceci_pipeline,

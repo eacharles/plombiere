@@ -21,8 +21,6 @@ from plombiere.dashboard.pages.crud._components import (
 
 # Maps FK column names to entity names recognised by BackendProvider.get_ops()
 FK_COLUMN_MAP: dict[str, str] = {
-    "execution_id": "execution",
-    "parent_execution_id": "execution",
     "ceci_pipeline_id": "ceci_pipeline",
     "ceci_pipeline_variant_id": "ceci_pipeline_variant",
     "ceci_stage_node_id": "ceci_stage_node",

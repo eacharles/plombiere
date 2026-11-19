@@ -12,7 +12,7 @@ config = CrudPageConfig(
     display_name="Edges",
     response_model=Edge,
     create_model=EdgeCreate,
-    table_columns=["id_", "from_id", "to_id", "execution_id"],
+    table_columns=["id_", "from_id", "to_id", "edge_template_id"],
     has_create=False,
 )
 

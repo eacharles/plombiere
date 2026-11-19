@@ -106,12 +106,7 @@ def render_instance_dag(instance_id_str):
 
         provider = BackendProvider.get()
         instance = provider.get_ops("ceci_pipeline_instance").get_row(UUID(instance_id_str))
-        if instance.execution_id is None:
-            return html.P(
-                "This instance has no linked execution record — it was ingested before execution tracking was added.",
-                style={"color": "#888"},
-            )
-        elements = instance_elements(instance.execution_id)
+        elements = instance_elements(instance.id_)
         if not elements:
             return html.P("No nodes found for this instance.")
         return html.Div([

@@ -2,73 +2,60 @@
 
 from datetime import date
 from typing import ClassVar
-from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
-from tisserande.models.types import ExecutionStatus
+from tisserande.models.base import Graph, GraphCreate, GraphTemplate, GraphTemplateCreate
 
 
-class CeciPipelineBase(BaseModel):
-    """Describes a generic pipeline."""
+class CeciPipelineMixin:
+    """Mixin for a GraphTemplate that describes a CECI pipeline."""
 
-    name: str = Field(..., description="Name of the pipeline")
-    description: str = Field(..., description="Description of the pipeline")
     structure: dict = Field(..., description="Contents of the pipeline YAML file")
     config: dict = Field(..., description="Contents of the default pipeline_config.yaml")
 
 
-class CeciPipelineCreate(CeciPipelineBase):
+class CeciPipelineCreate(GraphTemplateCreate, CeciPipelineMixin):
     """Fields used to create a CeciPipeline."""
 
 
-class CeciPipeline(CeciPipelineBase):
+class CeciPipeline(GraphTemplate, CeciPipelineMixin):
     """CeciPipeline response model."""
 
-    model_config = ConfigDict(from_attributes=True)
-    col_names_for_table: ClassVar[list[str]] = ["id_", "name"]
-
-    id_: int = Field(..., gt=0)
+    col_names_for_table: ClassVar[list[str]] = ["id_", "name", "version"]
 
 
-class CeciPipelineVariantBase(BaseModel):
-    """Describes a variant of a pipeline."""
+class CeciPipelineVariantMixin:
+    """Mixin for a GraphTemplate that describes a CECI pipeline variant."""
 
-    name: str = Field(..., description="Name of the variant")
     extra_description: str = Field(..., description="Additional description for this variant")
     overrides: dict = Field(..., description="Config overrides relative to the base CeciPipeline")
     ceci_pipeline_id: int = Field(..., description="Foreign key into CeciPipeline table")
 
 
-class CeciPipelineVariantCreate(CeciPipelineVariantBase):
+class CeciPipelineVariantCreate(GraphTemplateCreate, CeciPipelineVariantMixin):
     """Fields used to create a CeciPipelineVariant."""
 
 
-class CeciPipelineVariant(CeciPipelineVariantBase):
+class CeciPipelineVariant(GraphTemplate, CeciPipelineVariantMixin):
     """CeciPipelineVariant response model."""
 
-    model_config = ConfigDict(from_attributes=True)
-    col_names_for_table: ClassVar[list[str]] = ["id_", "name"]
-
-    id_: int = Field(..., gt=0)
+    col_names_for_table: ClassVar[list[str]] = ["id_", "name", "version"]
 
 
-class CeciPipelineInstanceBase(BaseModel):
-    """Describes an execution instance of a pipeline."""
+class CeciPipelineInstanceMixin:
+    """Mixin for a Graph that is a CECI pipeline execution instance."""
 
-    status: ExecutionStatus = Field(..., description="Execution status")
+    graph_template_id: int | None = None
     run_date: date = Field(..., description="Execution date")
     ceci_pipeline_variant_id: int = Field(..., description="Foreign key into CeciPipelineVariant table")
 
 
-class CeciPipelineInstanceCreate(CeciPipelineInstanceBase):
+class CeciPipelineInstanceCreate(GraphCreate, CeciPipelineInstanceMixin):
     """Fields used to create a CeciPipelineInstance."""
 
 
-class CeciPipelineInstance(CeciPipelineInstanceBase):
+class CeciPipelineInstance(Graph, CeciPipelineInstanceMixin):
     """CeciPipelineInstance response model."""
 
-    model_config = ConfigDict(from_attributes=True)
-    col_names_for_table: ClassVar[list[str]] = ["id_", "status", "run_date", "ceci_pipeline_variant_id"]
-
-    id_: UUID = Field(...)
+    col_names_for_table: ClassVar[list[str]] = ["uid_", "status", "run_date", "ceci_pipeline_variant_id"]

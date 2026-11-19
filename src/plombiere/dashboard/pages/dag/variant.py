@@ -29,10 +29,12 @@ _PLACEHOLDER = html.P(
 )
 
 
-def _kv_row(key, value):
+def _kv_row(key: str, value: Any) -> Any:
     return html.Div(
         [
-            html.Span(key, style={"fontWeight": "600", "color": "#555", "display": "block", "marginBottom": "2px"}),
+            html.Span(key, style={
+                "fontWeight": "600", "color": "#555", "display": "block", "marginBottom": "2px",
+            }),
             html.Span(
                 str(value) if value is not None else "—",
                 style={"wordBreak": "break-all", "color": "#333"},
@@ -80,7 +82,10 @@ def layout(**kwargs: Any) -> html.Div:
         ),
         html.Div(
             [
-                html.Div(id="dag-variant-graph-container", style={"flex": "1 1 0%", "minWidth": 0, "marginTop": "16px"}),
+                html.Div(
+                    id="dag-variant-graph-container",
+                    style={"flex": "1 1 0%", "minWidth": 0, "marginTop": "16px"},
+                ),
                 html.Div(id="dag-variant-detail-panel", children=_PLACEHOLDER, style=_DETAIL_PANEL_STYLE),
             ],
             style={"display": "flex", "gap": "0", "alignItems": "flex-start"},
@@ -137,7 +142,7 @@ clientside_callback(
     Input("dag-variant-rightclick-node", "data"),
     prevent_initial_call=True,
 )
-def show_variant_node_detail(node_data):
+def show_variant_node_detail(node_data: dict[str, Any] | None) -> Any:
     if not node_data:
         return _PLACEHOLDER
     node_type = node_data.get("node_type")

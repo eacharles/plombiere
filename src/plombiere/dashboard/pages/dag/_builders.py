@@ -170,7 +170,7 @@ def template_elements(
         if et.from_id in all_ids and et.to_id in all_ids:
             elements.append({
                 "data": {
-                    "id": str(et.id_),
+                    "id": f"e{et.id_}",
                     "source": str(et.from_id),
                     "target": str(et.to_id),
                     "label": et.arg_name or "",
@@ -209,16 +209,10 @@ def instance_elements(pipeline_instance_id: UUID | str) -> list[dict[str, Any]]:
         if str(n.uid_) in associated_node_ids
     ]
 
-    stage_node_ids_set: set[str] = {str(n.uid_) for n in stage_nodes}
-
     all_edges = edge_ops.get_rows(limit=_BIG)
     file_nodes = [
         n for n in provider.get_ops("ceci_file").get_rows(limit=_BIG)
-        if any(
-            str(e.from_id) in stage_node_ids_set or str(e.to_id) in stage_node_ids_set
-            for e in all_edges
-            if str(e.from_id) == str(n.uid_) or str(e.to_id) == str(n.uid_)
-        )
+        if str(n.uid_) in associated_node_ids
     ]
 
     node_ids: set[str] = set()

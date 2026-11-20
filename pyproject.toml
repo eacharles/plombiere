@@ -23,6 +23,7 @@ authors = [
 
 dependencies = [
     "tisserande",
+    "pydot",
     "pyyaml",
 ]
 
@@ -176,6 +177,8 @@ filterwarnings = [
     "ignore::pytest.PytestUnraisableExceptionWarning",
     # Plugin node models intentionally narrow parent fields (e.g. node_type discriminator override)
     "ignore:Field name.*shadows an attribute in parent:UserWarning",
+    # pydot uses an old pyparsing API internally
+    "ignore::pyparsing.warnings.PyparsingDeprecationWarning",
 ]
 python_files = ["tests/*.py", "tests/*/*.py"]
 python_classes = ["Test"]

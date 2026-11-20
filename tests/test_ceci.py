@@ -1,8 +1,7 @@
-"""Tests for CECI pipeline tables and ingestion utilities."""
+"""Tests for CECI pipeline tables and node type registration."""
 
 from __future__ import annotations
 
-import textwrap
 from datetime import date
 from pathlib import Path
 
@@ -149,307 +148,114 @@ class TestCeciPipelineLayer:
 
 
 # ---------------------------------------------------------------------------
-# Ingest tests
+# DOT pipeline registration tests
 # ---------------------------------------------------------------------------
 
-_PIPELINE_YAML = textwrap.dedent("""\
-    stages:
-      - name: train_fzboost
-        classname: FlexZBoostInformer
-        module_name: rail.estimation.algos.flexzboost
-        nprocess: 1
-        aliases:
-          output: model
-      - name: estimate_fzboost
-        classname: FlexZBoostEstimator
-        module_name: rail.estimation.algos.flexzboost
-        nprocess: 1
-    """)
+_PIPELINE_DOT = """\
+digraph pz_pipeline {
+    // File nodes
+    input_catalog [type=input,  label="input_catalog", file_format="FITS"];
+    model_file    [type=output, label="model_file",    file_format="pickle"];
+    output_pz     [type=output, label="output_pz",     file_format="HDF5"];
 
-_LOG_SUCCESS = textwrap.dedent("""\
-    Executing stage: FlexZBoostEstimator @ 2025-07-20 15:21:23.242275
-    Inserting handle into data store.  model: /pz/data/model.pkl, estimate_fzboost
-    Inserting handle into data store.  input: /pz/data/test.hdf5, estimate_fzboost
-    Inserting handle into data store.  output: /pz/data/inprogress_output.hdf5, estimate_fzboost
-    Stage complete: FlexZBoostEstimator @ 2025-07-20 15:21:25.913904 took 0.04 minutes
-    """)
+    // Stage nodes
+    inform   [type=stage, label="Inform",   python_path="rail.stages.Inform"];
+    estimate [type=stage, label="Estimate", python_path="rail.stages.Estimate"];
 
-_LOG_FAILURE = textwrap.dedent("""\
-    Executing stage: FlexZBoostInformer @ 2025-07-20 14:00:00.000000
-    Inserting handle into data store.  input: /pz/data/train.hdf5, train_fzboost
-    Stage failed: FlexZBoostInformer @ 2025-07-20 14:00:01.000000 after 0.02 minutes
-    """)
-
-_LOG_UNPARSEABLE = "This log has no execution markers.\n"
-
-_CONFIG_YAML = """\
-inform_fzboost:
-  seed: 42
-  trainfrac: 0.75
-estimate_fzboost:
-  chunk_size: 1000
+    // Edges
+    input_catalog -> inform   [arg_name="input"];
+    inform        -> model_file;
+    model_file    -> estimate [arg_name="model"];
+    input_catalog -> estimate [arg_name="input"];
+    estimate      -> output_pz;
+}
 """
 
 
 @pytest.fixture()
-def config_yaml_file(tmp_path: Path) -> Path:
-    p = tmp_path / "pz_config.yml"
-    p.write_text(_CONFIG_YAML)
+def dot_file(tmp_path: Path) -> Path:
+    p = tmp_path / "pz_pipeline.dot"
+    p.write_text(_PIPELINE_DOT)
     return p
 
 
-@pytest.fixture()
-def registered_pipeline():
-    from plombiere.local_sync import ceci_pipeline
+class TestRegisterPipelineFromDot:
+    def test_returns_pipeline(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-    return ceci_pipeline.create_row(
-        name="pz_dp1", description="Photo-z pipeline", structure={"stages": []}, config={}
-    )
+        pipeline, _, _ = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        assert pipeline.name == "pz_pipeline"
+        assert pipeline.id_ is not None
 
+    def test_stage_count(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-@pytest.fixture()
-def pipeline_yaml_file(tmp_path: Path) -> Path:
-    p = tmp_path / "test_pipeline.yaml"
-    p.write_text(_PIPELINE_YAML)
-    return p
+        _, stages, _ = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        assert len(stages) == 2
 
+    def test_file_type_count(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-@pytest.fixture()
-def log_dir_success(tmp_path: Path) -> Path:
-    d = tmp_path / "logs"
-    d.mkdir()
-    (d / "estimate_fzboost.out").write_text(_LOG_SUCCESS)
-    return d
+        _, _, file_types = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        assert len(file_types) == 3
 
+    def test_stage_names(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-@pytest.fixture()
-def log_dir_mixed(tmp_path: Path) -> Path:
-    d = tmp_path / "logs"
-    d.mkdir()
-    (d / "train_fzboost.out").write_text(_LOG_FAILURE)
-    (d / "estimate_fzboost.out").write_text(_LOG_SUCCESS)
-    return d
+        _, stages, _ = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        names = {s.name for s in stages}
+        assert names == {"Inform", "Estimate"}
 
+    def test_stage_python_path(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-@pytest.fixture()
-def log_dir_empty(tmp_path: Path) -> Path:
-    d = tmp_path / "logs"
-    d.mkdir()
-    (d / "junk.out").write_text(_LOG_UNPARSEABLE)
-    return d
+        _, stages, _ = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        paths = {s.python_path for s in stages}
+        assert "rail.stages.Inform" in paths
+        assert "rail.stages.Estimate" in paths
 
+    def test_file_type_formats(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-class TestRegisterPipelineFromYaml:
-    def test_creates_stage_nodes(self, pipeline_yaml_file: Path):
-        from plombiere.ceci_ingest import register_pipeline_from_yaml
+        _, _, file_types = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        formats = {f.file_format for f in file_types}
+        assert "FITS" in formats
+        assert "HDF5" in formats
 
-        pipeline_create, stage_nodes = register_pipeline_from_yaml(pipeline_yaml_file)
-        assert pipeline_create.name == "test_pipeline"
-        assert len(stage_nodes) == 2
-        names = {n.name for n in stage_nodes}
-        assert "FlexZBoostInformer" in names
-        assert "FlexZBoostEstimator" in names
+    def test_assoc_templates_created(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
+        from tisserande.local_sync import assoc_template as assoc_ops
 
-    def test_deduplication(self, tmp_path: Path):
-        """Same classname appearing twice → one schema node."""
-        yaml_content = textwrap.dedent("""\
-            stages:
-              - name: estimate_a
-                classname: FlexZBoostEstimator
-                module_name: rail.estimation.algos.flexzboost
-              - name: estimate_b
-                classname: FlexZBoostEstimator
-                module_name: rail.estimation.algos.flexzboost
-            """)
-        p = tmp_path / "dup.yaml"
-        p.write_text(yaml_content)
+        pipeline, stages, file_types = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        assocs = assoc_ops.get_rows()
+        member_ids = {a.node_template_id for a in assocs if a.graph_template_id == pipeline.id_}
+        expected_ids = {s.id_ for s in stages} | {f.id_ for f in file_types}
+        assert member_ids == expected_ids
 
-        from plombiere.ceci_ingest import register_pipeline_from_yaml
+    def test_edge_templates_created(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
+        from tisserande.local_sync import edge_template as et_ops
 
-        _, stage_nodes = register_pipeline_from_yaml(p)
-        assert len(stage_nodes) == 1
+        register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        edges = et_ops.get_rows()
+        assert len(edges) == 5
 
-    def test_empty_stages_raises(self, tmp_path: Path):
-        p = tmp_path / "empty.yaml"
-        p.write_text("stages: []\n")
+    def test_edge_arg_name(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
+        from tisserande.local_sync import edge_template as et_ops
 
-        from plombiere.ceci_ingest import register_pipeline_from_yaml
+        _, stages, _ = register_pipeline_from_dot(dot_file, name="pz_pipeline")
+        inform = next(s for s in stages if s.name == "Inform")
+        edges = et_ops.get_rows()
+        to_inform = [e for e in edges if e.to_id == inform.id_]
+        assert any(e.arg_name == "input" for e in to_inform)
 
-        with pytest.raises(ValueError, match="No stages found"):
-            register_pipeline_from_yaml(p)
+    def test_version_propagated(self, dot_file: Path):
+        from plombiere.ceci_pipeline_dot import register_pipeline_from_dot
 
-    def test_custom_name(self, pipeline_yaml_file: Path):
-        from plombiere.ceci_ingest import register_pipeline_from_yaml
-
-        pipeline_create, _ = register_pipeline_from_yaml(pipeline_yaml_file, name="my_pipeline")
-        assert pipeline_create.name == "my_pipeline"
-
-
-class TestIngestStageLogs:
-    def test_success_log_creates_records(self, log_dir_success: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-        from tisserande.local_sync import edge
-
-        _, stage_results = ingest_stage_logs(log_dir_success)
-
-        assert len(stage_results) == 1
-        stage_node, file_nodes = stage_results[0]
-        assert stage_node.status == ExecutionStatus.SUCCESS
-        assert stage_node.node_type == "ceci_stage_call"
-
-        assert len(file_nodes) == 3
-
-        edges = edge.get_rows()
-        from_stage = [e for e in edges if str(e.from_id) == str(stage_node.uid_)]
-        assert any(True for e in from_stage)
-
-    def test_inprogress_stripped_from_output_path(self, log_dir_success: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        _, stage_results = ingest_stage_logs(log_dir_success)
-        _, file_nodes = stage_results[0]
-        paths = {fn.file_path for fn in file_nodes}
-        assert not any("inprogress_" in p for p in paths if p)
-        assert "/pz/data/output.hdf5" in paths
-
-    def test_failure_log_sets_failure_status(self, log_dir_mixed: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        _, stage_results = ingest_stage_logs(log_dir_mixed)
-        statuses = {sn.status for sn, _ in stage_results}
-        assert ExecutionStatus.FAILURE in statuses
-        assert ExecutionStatus.SUCCESS in statuses
-
-    def test_stage_timing_recorded(self, log_dir_mixed: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        _, stage_results = ingest_stage_logs(log_dir_mixed)
-        for stage_node, _ in stage_results:
-            assert stage_node.start_time is not None
-            assert stage_node.end_time is not None
-            assert stage_node.duration_seconds is not None
-
-    def test_empty_log_dir_raises(self, log_dir_empty: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        with pytest.raises(ValueError, match="No parseable stage log files"):
-            ingest_stage_logs(log_dir_empty)
-
-
-class TestIngestStageLogsWithVariant:
-    """Tests for the pipeline_variant path of ingest_stage_logs."""
-
-    @pytest.fixture()
-    def variant(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        return register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
-
-    def test_returns_instance_when_variant_given(self, log_dir_success: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance is not None
-        assert instance.uid_ is not None
-
-    def test_instance_links_to_variant(self, log_dir_success: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance.ceci_pipeline_variant_id == variant.id_
-
-    def test_instance_status_success(self, log_dir_success: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance.status == ExecutionStatus.SUCCESS
-
-    def test_instance_run_date_from_log_start(self, log_dir_success: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        assert instance.run_date == date(2025, 7, 20)
-
-    def test_instance_persisted(self, log_dir_success: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-        from plombiere.local_sync import ceci_pipeline_instance
-
-        instance, _ = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        rows = ceci_pipeline_instance.get_rows()
-        assert any(str(r.uid_) == str(instance.uid_) for r in rows)
-
-    def test_no_variant_returns_none_instance(self, log_dir_success: Path):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        instance, _ = ingest_stage_logs(log_dir_success)
-        assert instance is None
-
-    def test_failure_pipeline_instance_status(self, log_dir_mixed: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-
-        instance, _ = ingest_stage_logs(log_dir_mixed, pipeline_variant=variant)
-        assert instance.status == ExecutionStatus.FAILURE
-
-    def test_stage_nodes_linked_to_instance(self, log_dir_success: Path, variant):
-        from plombiere.ceci_ingest import ingest_stage_logs
-        from tisserande.local_sync import association as assoc_ops
-
-        instance, stage_results = ingest_stage_logs(log_dir_success, pipeline_variant=variant)
-        graph_id = str(instance.uid_)
-        associated_node_ids = {str(a.node_id) for a in assoc_ops.get_rows() if str(a.graph_id) == graph_id}
-        for stage_node, _ in stage_results:
-            assert str(stage_node.uid_) in associated_node_ids
-
-
-class TestRegisterPipelineVariantFromYaml:
-    def test_creates_variant(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
-        assert variant.id_ is not None
-        assert variant.ceci_pipeline_id == registered_pipeline.id_
-
-    def test_default_name_from_file_stem(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
-        assert variant.name == "pz_config"
-
-    def test_custom_name(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        variant = register_pipeline_variant_from_yaml(
-            config_yaml_file, registered_pipeline.id_, name="gold_sample"
+        pipeline, stages, file_types = register_pipeline_from_dot(
+            dot_file, name="pz_pipeline", version="2.0"
         )
-        assert variant.name == "gold_sample"
-
-    def test_overrides_stored_from_yaml(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
-        assert variant.overrides["inform_fzboost"]["seed"] == 42
-        assert variant.overrides["estimate_fzboost"]["chunk_size"] == 1000
-
-    def test_extra_description(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        variant = register_pipeline_variant_from_yaml(
-            config_yaml_file, registered_pipeline.id_, extra_description="Gold sample run"
-        )
-        assert variant.extra_description == "Gold sample run"
-
-    def test_empty_config_yaml(self, tmp_path: Path, registered_pipeline):
-        p = tmp_path / "empty_config.yml"
-        p.write_text("{}\n")
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-
-        variant = register_pipeline_variant_from_yaml(p, registered_pipeline.id_)
-        assert variant.overrides == {}
-
-    def test_variant_persisted(self, config_yaml_file: Path, registered_pipeline):
-        from plombiere.ceci_ingest import register_pipeline_variant_from_yaml
-        from plombiere.local_sync import ceci_pipeline_variant
-
-        variant = register_pipeline_variant_from_yaml(config_yaml_file, registered_pipeline.id_)
-        rows = ceci_pipeline_variant.get_rows()
-        assert any(r.id_ == variant.id_ for r in rows)
+        assert pipeline.version == "2.0"
+        assert all(s.version == "2.0" for s in stages)
+        assert all(f.version == "2.0" for f in file_types)

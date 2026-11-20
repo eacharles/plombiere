@@ -1,4 +1,4 @@
-"""Pipeline DAG page — shows stage topology from the pipeline YAML structure."""
+"""Pipeline DAG page — bipartite template graph for a CeciPipeline."""
 
 from typing import Any
 
@@ -7,7 +7,7 @@ import dash_cytoscape as cyto
 from dash import Input, Output, State, callback, clientside_callback, dcc, html
 
 from plombiere.backend import BackendProvider
-from plombiere.dashboard.pages.dag._builders import DAG_LAYOUT, STYLESHEET, pipeline_elements
+from plombiere.dashboard.pages.dag._builders import DAG_LAYOUT, STYLESHEET, template_elements
 
 dash.register_page(__name__, path="/dag/pipeline", name="Pipeline DAG")
 
@@ -61,7 +61,8 @@ def layout(**kwargs: Any) -> html.Div:
     return html.Div([
         html.H2("Pipeline DAG"),
         html.P(
-            "Right-click a node to see its details.",
+            "Stage templates (rectangles) and file type templates (ellipses) "
+            "connected by data-flow edges. Right-click a node to see its details.",
             style={"color": "#888", "fontSize": "13px"},
         ),
         html.Hr(),
@@ -96,16 +97,23 @@ def render_pipeline_dag(pipeline_id: Any) -> Any:
     if pipeline_id is None:
         return html.P("Select a pipeline above.", style={"color": "#888", "fontStyle": "italic"})
     try:
-        ops = BackendProvider.get().get_ops("ceci_pipeline")
-        pipeline = ops.get_row(pipeline_id)
-        elements = pipeline_elements(pipeline.structure)
+        elements = template_elements(int(pipeline_id))
         if not elements:
-            return html.P("No stages found in this pipeline.")
+            return html.P(
+                "No template graph found for this pipeline. "
+                "Use register_pipeline_from_dot() to populate it.",
+                style={"color": "#888"},
+            )
         return cyto.Cytoscape(
             id="dag-pipeline-graph",
             elements=elements,
             layout=DAG_LAYOUT,
-            style={"width": "100%", "height": "620px", "border": "1px solid #dee2e6", "borderRadius": "4px"},
+            style={
+                "width": "100%",
+                "height": "620px",
+                "border": "1px solid #dee2e6",
+                "borderRadius": "4px",
+            },
             stylesheet=STYLESHEET,
         )
     except Exception as e:
@@ -137,17 +145,23 @@ def show_pipeline_node_detail(node_data: dict[str, Any] | None) -> Any:
     if not node_data:
         return _PLACEHOLDER
     node_type = node_data.get("node_type")
-    if node_type == "stage":
-        title = f"Stage: {node_data.get('stage_name', '?')}"
-        aliases = node_data.get("aliases") or {}
+
+    if node_type == "ceci_stage":
+        title = f"Stage: {node_data.get('name', '?')}"
         fields = [
-            ("name", node_data.get("stage_name")),
-            ("classname", node_data.get("classname")),
-            ("aliases", ", ".join(f"{k}→{v}" for k, v in aliases.items()) or "—"),
+            ("name", node_data.get("name")),
+            ("python_path", node_data.get("python_path")),
+            ("version", node_data.get("version")),
+            ("description", node_data.get("description")),
         ]
-    elif node_type == "file":
-        title = f"File handle: {node_data.get('handle', '?')}"
-        fields = [("handle", node_data.get("handle"))]
+    elif node_type == "ceci_file_type":
+        title = f"File type: {node_data.get('name', '?')}"
+        fields = [
+            ("name", node_data.get("name")),
+            ("file_format", node_data.get("file_format")),
+            ("version", node_data.get("version")),
+            ("description", node_data.get("description")),
+        ]
     else:
         return _PLACEHOLDER
 

@@ -87,86 +87,95 @@ STYLESHEET: list[dict[str, Any]] = [
 
 DAG_LAYOUT: dict[str, Any] = {
     "name": "dagre",
-    "rankDir": "LR",
-    "nodeSep": 25,
-    "rankSep": 90,
+    "rankDir": "TB",
+    "nodeSep": 40,
+    "rankSep": 70,
     "padding": 30,
 }
 
 
 # ---------------------------------------------------------------------------
-# Pipeline / variant graph (from YAML structure)
+# Pipeline / variant graph (from DB template records for a CeciPipeline)
 # ---------------------------------------------------------------------------
 
-def pipeline_elements(
-    structure: dict[str, Any],
+
+def template_elements(
+    pipeline_id: int,
     overrides: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build bipartite Cytoscape elements from a pipeline YAML structure.
+    """Build Cytoscape elements from a pipeline's template graph.
 
-    Creates stage nodes (rectangles) and file-handle nodes (ellipses) as
-    intermediate vertices. A handle shared between two stages produces:
-      producer_stage → file_handle_node → consumer_stage
+    Fetches AssocTemplate membership, then resolves each member to either a
+    CeciStage (rectangle) or a CeciFileType (ellipse).  EdgeTemplate rows
+    supply the directed edges with optional ``arg_name`` labels.
+
+    ``overrides`` maps stage name → config dict; matching stages are styled
+    as ``stage-override`` (orange) instead of the default blue.
     """
-    stages: list[dict[str, Any]] = structure.get("stages", [])
-    if not stages:
+    from tisserande.local_sync import assoc_template as assoc_ops
+    from tisserande.local_sync import edge_template as et_ops
+
+    from plombiere.local_sync.node_types import ceci_file_type as file_type_ops
+    from plombiere.local_sync.node_types import ceci_stage as stage_ops
+
+    _BIG = 10_000  # bypass macon's default_pagination_limit=100
+
+    member_ids: set[int] = {
+        a.node_template_id
+        for a in assoc_ops.get_rows(limit=_BIG)
+        if a.graph_template_id == pipeline_id
+    }
+    if not member_ids:
         return []
 
-    # Track the first stage (by YAML index) that introduces each handle value.
-    handle_first: dict[str, tuple[int, str]] = {}
-    for i, stage in enumerate(stages):
-        for handle in stage.get("aliases", {}).values():
-            if handle not in handle_first:
-                handle_first[handle] = (i, stage["name"])
+    stages = {s.id_: s for s in stage_ops.get_rows(limit=_BIG) if s.id_ in member_ids}
+    file_types = {f.id_: f for f in file_type_ops.get_rows(limit=_BIG) if f.id_ in member_ids}
+    all_ids = set(stages) | set(file_types)
 
     elements: list[dict[str, Any]] = []
 
-    # Stage nodes
-    for stage in stages:
-        name = stage["name"]
-        classname = stage.get("classname", name)
-        has_override = bool(overrides and name in overrides)
+    for sid, stage in stages.items():
+        has_override = bool(overrides and stage.name in overrides)
         elements.append({
             "data": {
-                "id": name,
-                "label": f"{classname}\n({name})",
-                "node_type": "stage",
-                "stage_name": name,
-                "classname": classname,
-                "aliases": stage.get("aliases", {}),
-                "overrides": overrides.get(name) if overrides else None,
+                "id": str(sid),
+                "label": stage.name or f"stage:{sid}",
+                "node_type": "ceci_stage",
+                "node_template_id": sid,
+                "name": stage.name,
+                "python_path": stage.python_path,
+                "version": stage.version,
+                "description": stage.description,
+                "overrides": overrides.get(stage.name) if overrides else None,
             },
             "classes": "stage-override" if has_override else "stage",
         })
 
-    # File-handle nodes and bipartite edges
-    seen_file_nodes: set[str] = set()
-    seen_edges: set[tuple[str, str]] = set()
+    for fid, ft in file_types.items():
+        elements.append({
+            "data": {
+                "id": str(fid),
+                "label": ft.name or f"file:{fid}",
+                "node_type": "ceci_file_type",
+                "node_template_id": fid,
+                "name": ft.name,
+                "file_format": ft.file_format,
+                "version": ft.version,
+                "description": ft.description,
+            },
+            "classes": "file",
+        })
 
-    for i, stage in enumerate(stages):
-        dst = stage["name"]
-        for handle in stage.get("aliases", {}).values():
-            first_i, src = handle_first[handle]
-            if first_i >= i:
-                continue
-            file_id = f"__file__{handle}"
-            if file_id not in seen_file_nodes:
-                seen_file_nodes.add(file_id)
-                elements.append({
-                    "data": {"id": file_id, "label": handle, "node_type": "file", "handle": handle},
-                    "classes": "file",
-                })
-            for edge in ((src, file_id), (file_id, dst)):
-                if edge not in seen_edges:
-                    seen_edges.add(edge)
-                    elements.append({
-                        "data": {
-                            "id": f"{edge[0]}--{edge[1]}",
-                            "source": edge[0],
-                            "target": edge[1],
-                            "label": "",
-                        }
-                    })
+    for et in et_ops.get_rows(limit=_BIG):
+        if et.from_id in all_ids and et.to_id in all_ids:
+            elements.append({
+                "data": {
+                    "id": str(et.id_),
+                    "source": str(et.from_id),
+                    "target": str(et.to_id),
+                    "label": et.arg_name or "",
+                }
+            })
 
     return elements
 
@@ -185,26 +194,29 @@ def instance_elements(pipeline_instance_id: UUID | str) -> list[dict[str, Any]]:
 
     from plombiere.backend import BackendProvider
 
+    _BIG = 10_000  # bypass macon's default_pagination_limit=100
+
     provider = BackendProvider.get()
     instance_id_str = str(pipeline_instance_id)
 
     associated_node_ids = {
         str(a.node_id)
-        for a in provider.get_ops("association").get_rows()
+        for a in provider.get_ops("association").get_rows(limit=_BIG)
         if str(a.graph_id) == instance_id_str
     }
     stage_nodes = [
-        n for n in provider.get_ops("ceci_stage_call").get_rows()
+        n for n in provider.get_ops("ceci_stage_call").get_rows(limit=_BIG)
         if str(n.uid_) in associated_node_ids
     ]
 
     stage_node_ids_set: set[str] = {str(n.uid_) for n in stage_nodes}
 
+    all_edges = edge_ops.get_rows(limit=_BIG)
     file_nodes = [
-        n for n in provider.get_ops("ceci_file").get_rows()
+        n for n in provider.get_ops("ceci_file").get_rows(limit=_BIG)
         if any(
             str(e.from_id) in stage_node_ids_set or str(e.to_id) in stage_node_ids_set
-            for e in edge_ops.get_rows()
+            for e in all_edges
             if str(e.from_id) == str(n.uid_) or str(e.to_id) == str(n.uid_)
         )
     ]
@@ -250,7 +262,7 @@ def instance_elements(pipeline_instance_id: UUID | str) -> list[dict[str, Any]]:
             "classes": "file",
         })
 
-    for e in edge_ops.get_rows():
+    for e in all_edges:
         src, dst = str(e.from_id), str(e.to_id)
         if src in node_ids and dst in node_ids:
             elements.append({

@@ -8,7 +8,6 @@ lifetime instead of resetting it before every test.
 from __future__ import annotations
 
 import asyncio
-import textwrap
 
 import pytest
 
@@ -23,65 +22,11 @@ pytestmark = [
     pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning"),
 ]
 
-# ---------------------------------------------------------------------------
-# Override the autouse DB-reset fixture so dashboard tests keep their DB
-# ---------------------------------------------------------------------------
-
-_PIPELINE_YAML = textwrap.dedent("""\
-    stages:
-      - name: ingest
-        classname: IngestStage
-        module_name: test.pipeline
-        aliases:
-          output: raw_data
-      - name: process
-        classname: ProcessStage
-        module_name: test.pipeline
-        aliases:
-          input: raw_data
-          output: processed_data
-      - name: summarise
-        classname: SummariseStage
-        module_name: test.pipeline
-        aliases:
-          input: processed_data
-""")
-
-# Synthetic stage log files — one per stage, matching the YAML classnames
-_STAGE_LOGS: dict[str, str] = {
-    "ingest": textwrap.dedent("""\
-        Executing stage: IngestStage @ 2025-01-01 10:00:00.000000
-        Inserting handle into data store.  raw_data: inprogress_/data/raw_data.fits, ingest
-        Stage complete: IngestStage @ 2025-01-01 10:01:00.000000 took 1.0 minutes
-    """),
-    "process": textwrap.dedent("""\
-        Executing stage: ProcessStage @ 2025-01-01 10:01:00.000000
-        Inserting handle into data store.  raw_data: /data/raw_data.fits, process
-        Inserting handle into data store.  processed_data: inprogress_/data/processed_data.fits, process
-        Stage complete: ProcessStage @ 2025-01-01 10:03:00.000000 took 2.0 minutes
-    """),
-    "summarise": textwrap.dedent("""\
-        Executing stage: SummariseStage @ 2025-01-01 10:03:00.000000
-        Inserting handle into data store.  processed_data: /data/processed_data.fits, summarise
-        Stage complete: SummariseStage @ 2025-01-01 10:05:00.000000 took 2.0 minutes
-    """),
-}
-
-_CONFIG_YAML = textwrap.dedent("""\
-    ingest:
-      batch_size: 100
-    process:
-      algorithm: fast
-""")
-
 
 @pytest.fixture(autouse=True)
 def _setup_db():
     """No-op: dashboard tests use the module-scoped dash_db_url fixture."""
     yield
-
-
-
 
 
 @pytest.fixture(scope="module")
@@ -107,29 +52,21 @@ def dash_db_url(tmp_path_factory):
 
     asyncio.run(_create_tables())
 
-    yaml_path = db_dir / "pipeline.yaml"
-    config_path = db_dir / "config.yaml"
-    yaml_path.write_text(_PIPELINE_YAML)
-    config_path.write_text(_CONFIG_YAML)
-
-    from plombiere.ceci_ingest import (
-        ingest_stage_logs,
-        register_pipeline_from_yaml,
-        register_pipeline_variant_from_yaml,
-    )
     from plombiere.local_sync import ceci_pipeline as pipeline_ops
+    from plombiere.local_sync import ceci_pipeline_variant as variant_ops
 
-    pipeline_create, schema_nodes = register_pipeline_from_yaml(yaml_path, name="test_pipeline")
-    pipeline_row = pipeline_ops.create_row(**pipeline_create.model_dump())
-    variant = register_pipeline_variant_from_yaml(config_path, pipeline_row.id_, name="test_variant")
-
-    # Write synthetic log files and ingest to create a CeciPipelineInstance
-    log_dir = db_dir / "logs"
-    log_dir.mkdir()
-    for stage_name, content in _STAGE_LOGS.items():
-        (log_dir / f"{stage_name}.out").write_text(content)
-
-    ingest_stage_logs(log_dir, schema_nodes=schema_nodes, pipeline_variant=variant)
+    pipeline_row = pipeline_ops.create_row(
+        name="test_pipeline",
+        description="Test pipeline",
+        structure={},
+        config={},
+    )
+    variant_ops.create_row(
+        name="test_variant",
+        extra_description="",
+        overrides={},
+        ceci_pipeline_id=pipeline_row.id_,
+    )
 
     asyncio.run(close_db())
     return url

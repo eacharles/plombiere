@@ -7,7 +7,7 @@ import dash_cytoscape as cyto
 from dash import Input, Output, State, callback, clientside_callback, dcc, html
 
 from plombiere.backend import BackendProvider
-from plombiere.dashboard.pages.dag._builders import DAG_LAYOUT, STYLESHEET, pipeline_elements
+from plombiere.dashboard.pages.dag._builders import DAG_LAYOUT, STYLESHEET, template_elements
 
 dash.register_page(__name__, path="/dag/variant", name="Variant DAG")
 
@@ -106,10 +106,13 @@ def render_variant_dag(variant_id: Any) -> Any:
     try:
         provider = BackendProvider.get()
         variant = provider.get_ops("ceci_pipeline_variant").get_row(variant_id)
-        pipeline = provider.get_ops("ceci_pipeline").get_row(variant.ceci_pipeline_id)
-        elements = pipeline_elements(pipeline.structure, overrides=variant.overrides)
+        elements = template_elements(variant.ceci_pipeline_id, overrides=variant.overrides)
         if not elements:
-            return html.P("No stages found in this pipeline.")
+            return html.P(
+                "No template graph found for this pipeline. "
+                "Use register_pipeline_from_dot() to populate it.",
+                style={"color": "#888"},
+            )
         return cyto.Cytoscape(
             id="dag-variant-graph",
             elements=elements,
@@ -146,19 +149,24 @@ def show_variant_node_detail(node_data: dict[str, Any] | None) -> Any:
     if not node_data:
         return _PLACEHOLDER
     node_type = node_data.get("node_type")
-    if node_type == "stage":
-        title = f"Stage: {node_data.get('stage_name', '?')}"
-        aliases = node_data.get("aliases") or {}
+    if node_type == "ceci_stage":
+        title = f"Stage: {node_data.get('name', '?')}"
         overrides = node_data.get("overrides")
         fields = [
-            ("name", node_data.get("stage_name")),
-            ("classname", node_data.get("classname")),
-            ("aliases", ", ".join(f"{k}→{v}" for k, v in aliases.items()) or "—"),
+            ("name", node_data.get("name")),
+            ("python_path", node_data.get("python_path")),
+            ("version", node_data.get("version")),
+            ("description", node_data.get("description")),
             ("overrides", overrides if overrides else "—"),
         ]
-    elif node_type == "file":
-        title = f"File handle: {node_data.get('handle', '?')}"
-        fields = [("handle", node_data.get("handle"))]
+    elif node_type == "ceci_file_type":
+        title = f"File type: {node_data.get('name', '?')}"
+        fields = [
+            ("name", node_data.get("name")),
+            ("file_format", node_data.get("file_format")),
+            ("version", node_data.get("version")),
+            ("description", node_data.get("description")),
+        ]
     else:
         return _PLACEHOLDER
 

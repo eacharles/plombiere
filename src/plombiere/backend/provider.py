@@ -18,8 +18,8 @@ class _TypeFilteredNodeOps:
         self._ops = node_ops
         self._type = type_value
 
-    def get_rows(self) -> list[Any]:
-        return [r for r in self._ops.get_rows() if str(r.node_type) == self._type]
+    def get_rows(self, limit: int = 10_000, **kwargs: Any) -> list[Any]:
+        return [r for r in self._ops.get_rows(limit=limit, **kwargs) if str(r.node_type) == self._type]
 
     def count_rows(self) -> int:
         return len(self.get_rows())
@@ -84,12 +84,18 @@ class BackendProvider:
         from tisserande import local_sync as ts_sync
         from plombiere import local_sync as pl_sync
 
+        from plombiere.local_sync.node_types import ceci_file_type, ceci_stage
+
         ops_map: dict[str, Any] = {
             "node": ts_sync.node,
             "edge": ts_sync.edge,
             "association": ts_sync.association,
+            "edge_template": ts_sync.edge_template,
+            "assoc_template": ts_sync.assoc_template,
             "ceci_file": _TypeFilteredNodeOps(ts_sync.node, "ceci_file"),
             "ceci_stage_call": _TypeFilteredNodeOps(ts_sync.node, "ceci_stage_call"),
+            "ceci_stage": ceci_stage,
+            "ceci_file_type": ceci_file_type,
             "ceci_pipeline": pl_sync.ceci_pipeline,
             "ceci_pipeline_variant": pl_sync.ceci_pipeline_variant,
             "ceci_pipeline_instance": pl_sync.ceci_pipeline_instance,

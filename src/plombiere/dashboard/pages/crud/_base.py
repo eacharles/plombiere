@@ -134,7 +134,7 @@ def register_crud_callbacks(config: CrudPageConfig) -> None:
     def refresh_table(n_clicks: Any) -> Any:
         try:
             ops = BackendProvider.get().get_ops(config.entity_name)
-            rows = ops.get_rows()
+            rows = ops.get_rows(limit=10_000)
             return [
                 {col: _serialize_value(getattr(row, col, None)) for col in config.table_columns}
                 for row in rows
